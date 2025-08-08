@@ -129,7 +129,8 @@ func (m *Manager) ExportSession(sessionID string) (string, error) {
 
 	// Create exports directory
 	exportDir := "exports"
-	if err := os.MkdirAll(exportDir, 0755); err != nil {
+	// #nosec G301 - Export directory needs to be readable for serving files
+	if err := os.MkdirAll(exportDir, 0750); err != nil {
 		return "", fmt.Errorf("error creating export directory: %w", err)
 	}
 
@@ -144,7 +145,8 @@ func (m *Manager) ExportSession(sessionID string) (string, error) {
 	}
 
 	// Write to file
-	if err := os.WriteFile(filepath, data, 0644); err != nil {
+	// #nosec G306 - Export files need to be readable by the user
+	if err := os.WriteFile(filepath, data, 0640); err != nil {
 		return "", fmt.Errorf("error writing file: %w", err)
 	}
 

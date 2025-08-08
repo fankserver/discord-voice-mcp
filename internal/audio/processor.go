@@ -18,7 +18,7 @@ const (
 	sampleRate = 48000
 	channels   = 2
 	frameSize  = 960 // 20ms @ 48kHz
-	
+
 	// Buffer configuration
 	transcriptionBufferSize = sampleRate * channels * 2 * 2 // 2 seconds of audio (samples * channels * bytes per sample * seconds)
 )
@@ -72,6 +72,8 @@ func (p *Processor) ProcessVoiceReceive(vc *discordgo.VoiceConnection, sessionMa
 		// Convert PCM to bytes
 		pcmBytes := make([]byte, len(pcm)*2) // samples * 2 bytes per sample
 		for i := 0; i < len(pcm); i++ {
+			// Safe conversion from int16 to uint16 for binary encoding
+			// #nosec G115 - This is safe as we're reinterpreting the bits, not converting the value
 			binary.LittleEndian.PutUint16(pcmBytes[i*2:], uint16(pcm[i]))
 		}
 
@@ -86,7 +88,7 @@ func (p *Processor) ProcessVoiceReceive(vc *discordgo.VoiceConnection, sessionMa
 			go p.transcribeAndClear(stream, sessionManager, activeSessionID)
 		}
 	}
-	
+
 	logrus.Info("Voice receive channel closed")
 }
 

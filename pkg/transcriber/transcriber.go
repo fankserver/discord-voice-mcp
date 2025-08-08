@@ -41,6 +41,7 @@ func (wt *WhisperTranscriber) Transcribe(audio []byte) (string, error) {
 	}
 
 	// Call whisper (simplified for PoC)
+	// #nosec G204 - modelPath is controlled by server configuration, not user input
 	whisperCmd := exec.Command("whisper", "-m", wt.modelPath, "-")
 	whisperCmd.Stdin = bytes.NewReader(wavData)
 

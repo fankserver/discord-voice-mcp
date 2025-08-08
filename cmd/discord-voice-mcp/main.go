@@ -49,7 +49,7 @@ func main() {
 	logrus.SetFormatter(&logrus.TextFormatter{
 		FullTimestamp: true,
 	})
-	
+
 	// Set log level from environment
 	logLevel := os.Getenv("LOG_LEVEL")
 	switch strings.ToLower(logLevel) {
@@ -115,7 +115,7 @@ func main() {
 			"guild_id":   GuildID,
 			"channel_id": ChannelID,
 		}).Info("Auto-joining voice channel")
-		
+
 		err = voiceBot.JoinChannel(GuildID, ChannelID)
 		if err != nil {
 			logrus.WithError(err).Error("Error joining channel")
