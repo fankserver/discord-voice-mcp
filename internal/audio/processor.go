@@ -13,6 +13,16 @@ import (
 	"layeh.com/gopus"
 )
 
+const (
+	// Audio configuration
+	sampleRate = 48000
+	channels   = 2
+	frameSize  = 960 // 20ms @ 48kHz
+	
+	// Buffer configuration
+	transcriptionBufferSize = sampleRate * channels * 2 * 2 // 2 seconds of audio (samples * channels * bytes per sample * seconds)
+)
+
 // Processor handles audio capture and transcription
 type Processor struct {
 	mu            sync.Mutex
@@ -39,7 +49,7 @@ func NewProcessor(t transcriber.Transcriber) *Processor {
 // ProcessVoiceReceive handles incoming voice packets
 func (p *Processor) ProcessVoiceReceive(vc *discordgo.VoiceConnection, sessionManager *session.Manager, activeSessionID string) {
 	// Create opus decoder
-	decoder, err := gopus.NewDecoder(48000, 2)
+	decoder, err := gopus.NewDecoder(sampleRate, channels)
 	if err != nil {
 		log.Printf("Error creating opus decoder: %v", err)
 		return
@@ -50,9 +60,13 @@ func (p *Processor) ProcessVoiceReceive(vc *discordgo.VoiceConnection, sessionMa
 	// Process incoming audio
 	for {
 		select {
-		case packet := <-vc.OpusRecv:
+		case packet, ok := <-vc.OpusRecv:
+			if !ok {
+				log.Println("Voice receive channel closed")
+				return
+			}
+			
 			// Decode opus to PCM
-			frameSize := 960 // 20ms @ 48kHz
 			pcm, err := decoder.Decode(packet.Opus, frameSize, false)
 			if err != nil {
 				log.Printf("Error decoding opus: %v", err)
@@ -75,15 +89,8 @@ func (p *Processor) ProcessVoiceReceive(vc *discordgo.VoiceConnection, sessionMa
 			stream.mu.Unlock()
 
 			// If buffer is large enough, transcribe
-			if bufferSize > 48000*2*2*2 { // 2 seconds of audio
+			if bufferSize > transcriptionBufferSize {
 				go p.transcribeAndClear(stream, sessionManager, activeSessionID)
-			}
-
-		default:
-			// Check if voice connection is closed
-			if vc.Ready == false {
-				log.Println("Voice connection closed")
-				return
 			}
 		}
 	}

@@ -125,8 +125,16 @@ func (s *Server) handleMessage(msg map[string]interface{}) {
 		}
 
 	case "tools/call":
-		params := msg["params"].(map[string]interface{})
-		toolName := params["name"].(string)
+		params, ok := msg["params"].(map[string]interface{})
+		if !ok {
+			log.Printf("Invalid params in tools/call")
+			return
+		}
+		toolName, ok := params["name"].(string)
+		if !ok {
+			log.Printf("Invalid tool name in tools/call")
+			return
+		}
 		toolArgs, _ := params["arguments"].(map[string]interface{})
 
 		result := s.executeTool(toolName, toolArgs)
@@ -139,8 +147,17 @@ func (s *Server) handleMessage(msg map[string]interface{}) {
 func (s *Server) executeTool(name string, args map[string]interface{}) interface{} {
 	switch name {
 	case "join_voice_channel":
-		guildID := args["guildId"].(string)
-		channelID := args["channelId"].(string)
+		if args == nil {
+			return map[string]interface{}{"error": "missing arguments"}
+		}
+		guildID, ok := args["guildId"].(string)
+		if !ok {
+			return map[string]interface{}{"error": "missing or invalid 'guildId' parameter"}
+		}
+		channelID, ok := args["channelId"].(string)
+		if !ok {
+			return map[string]interface{}{"error": "missing or invalid 'channelId' parameter"}
+		}
 		err := s.bot.JoinChannel(guildID, channelID)
 		if err != nil {
 			return map[string]interface{}{"error": err.Error()}
@@ -152,7 +169,13 @@ func (s *Server) executeTool(name string, args map[string]interface{}) interface
 		return map[string]interface{}{"success": true, "message": "Left voice channel"}
 
 	case "get_transcript":
-		sessionID := args["sessionId"].(string)
+		if args == nil {
+			return map[string]interface{}{"error": "missing arguments"}
+		}
+		sessionID, ok := args["sessionId"].(string)
+		if !ok {
+			return map[string]interface{}{"error": "missing or invalid 'sessionId' parameter"}
+		}
 		session, err := s.sessions.GetSession(sessionID)
 		if err != nil {
 			return map[string]interface{}{"error": err.Error()}
@@ -164,7 +187,13 @@ func (s *Server) executeTool(name string, args map[string]interface{}) interface
 		return map[string]interface{}{"sessions": sessions}
 
 	case "export_session":
-		sessionID := args["sessionId"].(string)
+		if args == nil {
+			return map[string]interface{}{"error": "missing arguments"}
+		}
+		sessionID, ok := args["sessionId"].(string)
+		if !ok {
+			return map[string]interface{}{"error": "missing or invalid 'sessionId' parameter"}
+		}
 		filepath, err := s.sessions.ExportSession(sessionID)
 		if err != nil {
 			return map[string]interface{}{"error": err.Error()}
@@ -177,7 +206,11 @@ func (s *Server) executeTool(name string, args map[string]interface{}) interface
 }
 
 func (s *Server) sendMessage(msg map[string]interface{}) {
-	data, _ := json.Marshal(msg)
+	data, err := json.Marshal(msg)
+	if err != nil {
+		log.Printf("failed to marshal MCP message: %v", err)
+		return
+	}
 	s.writer.Write(data)
 	s.writer.WriteByte('\n')
 	s.writer.Flush()

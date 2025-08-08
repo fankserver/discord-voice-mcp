@@ -3,6 +3,7 @@ package transcriber
 import (
 	"bytes"
 	"fmt"
+	"log"
 	"os/exec"
 )
 
@@ -44,6 +45,7 @@ func (wt *WhisperTranscriber) Transcribe(audio []byte) (string, error) {
 
 	output, err := whisperCmd.Output()
 	if err != nil {
+		log.Printf("whisper command failed: %v", err)
 		// For PoC, just return empty on error
 		return "", nil
 	}

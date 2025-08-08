@@ -2,11 +2,11 @@
 
 # Build the Go binary
 build:
-	go build -ldflags="-w -s" -o discord-voice-mcp .
+	go build -ldflags="-w -s" -o discord-voice-mcp ./cmd/discord-voice-mcp
 
 # Run the application
 run:
-	go run .
+	go run ./cmd/discord-voice-mcp
 
 # Run tests
 test:
@@ -20,7 +20,7 @@ clean:
 
 # Build Docker image (Go version)
 docker-build:
-	docker build -f Dockerfile.go -t discord-voice-mcp:go .
+	docker build -f Dockerfile -t discord-voice-mcp:go .
 
 # Run Docker container (Go version)
 docker-run:

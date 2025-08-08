@@ -138,7 +138,12 @@ func (vb *VoiceBot) messageCreate(s *discordgo.Session, m *discordgo.MessageCrea
 	switch m.Content {
 	case "!join":
 		// Get user's voice channel
-		g, _ := s.State.Guild(m.GuildID)
+		g, err := s.State.Guild(m.GuildID)
+		if err != nil || g == nil {
+			log.Printf("Could not find guild %s in state: %v", m.GuildID, err)
+			s.ChannelMessageSend(m.ChannelID, "Error: Could not retrieve guild information.")
+			return
+		}
 		for _, vs := range g.VoiceStates {
 			if vs.UserID == m.Author.ID {
 				vb.JoinChannel(m.GuildID, vs.ChannelID)
