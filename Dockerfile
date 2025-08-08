@@ -1,5 +1,5 @@
 # Build stage
-FROM golang:1.24-alpine AS builder
+FROM golang:1.24-alpine3.20 AS builder
 
 # Install build dependencies
 RUN apk add --no-cache git gcc musl-dev
@@ -21,10 +21,9 @@ RUN CGO_ENABLED=1 GOOS=linux GOARCH=amd64 \
 # Final stage - using alpine for ffmpeg support
 FROM alpine:3.20
 
-# Install only ffmpeg (needed for audio processing) 
-# Using --no-cache to avoid storing package index
-RUN apk add --no-cache ffmpeg && \
-    rm -rf /var/cache/apk/*
+# Install only ffmpeg (needed for audio processing)
+# hadolint ignore=DL3018
+RUN apk add --no-cache ffmpeg
 
 WORKDIR /app
 
