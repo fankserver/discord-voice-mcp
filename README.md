@@ -1,247 +1,188 @@
 # Discord Voice MCP Server
 
-A Model Context Protocol (MCP) server that bridges Discord voice channels with Claude Code, enabling voice-based development workflows. Speak your ideas in Discord, and they appear as context in Claude Code for refinement and implementation.
-
-## Features
-
-- 🎙️ **Real-time voice transcription** from Discord voice channels
-- 🔄 **Multiple transcription providers**: Vosk (offline), Whisper.cpp (offline), Google Cloud Speech
-- 💾 **Session management**: Save and retrieve transcription sessions
-- 🔌 **Claude Code integration**: Direct MCP integration for seamless workflow
-- 🎯 **Provider switching**: Hot-swap between transcription providers on the fly
+A Model Context Protocol (MCP) server that bridges Discord voice channels with Claude Code, enabling voice-based development workflows. Speak in Discord, and your words become context in Claude Code.
 
 ## Quick Start
 
-### 🐳 Docker Installation (Recommended)
-
-#### Option 1: Use Pre-built Images from GitHub Container Registry
+### Option 1: Docker (Recommended)
 
 ```bash
-# Pull and run directly (no build needed!)
+# Clone the repository
+git clone https://github.com/fankserver/discord-voice-mcp.git
+cd discord-voice-mcp
+
+# Copy environment file and add your Discord credentials
+cp .env.example .env
+# Edit .env with your DISCORD_TOKEN and DISCORD_CLIENT_ID
+
+# Run with Docker Compose
+docker-compose up -d
+
+# View logs
+docker-compose logs -f
+```
+
+### Option 2: Pre-built Docker Image
+
+```bash
+# Pull and run from GitHub Container Registry
 docker run -d \
   --name discord-voice-mcp \
   -e DISCORD_TOKEN="your-token" \
   -e DISCORD_CLIENT_ID="your-client-id" \
-  -e TRANSCRIPTION_PROVIDER="vosk" \
-  -v $(pwd)/models:/app/models \
+  -v discord-models:/app/models \
   ghcr.io/fankserver/discord-voice-mcp:latest
 ```
 
-See [GHCR_USAGE.md](GHCR_USAGE.md) for using pre-built images.
-
-#### Option 2: Build Locally with Setup Script
+### Option 3: Local Installation
 
 ```bash
-# Clone repository
-git clone https://github.com/yourusername/discord-voice-mcp.git
-cd discord-voice-mcp
+# Prerequisites: Node.js 18+, ffmpeg
+npm install
 
-# Run interactive setup
-chmod +x docker-setup.sh
-./docker-setup.sh --interactive
-```
+# Set up Discord credentials in .env
+cp .env.example .env
 
-See [DOCKER_README.md](DOCKER_README.md) for detailed Docker instructions.
-
-### 📦 Manual Installation
-
-Prerequisites:
-- Node.js 18+
-- Discord Bot Token
-- Claude Desktop
-
-```bash
-# Clone and setup
-chmod +x scripts/setup.sh
-./scripts/setup.sh
-```
-
-3. Configure your Discord bot:
-   - Create a bot at https://discord.com/developers/applications
-   - Copy the bot token to `.env` file
-   - Invite bot to your server with voice permissions
-
-4. Choose and install a transcription provider:
-   - **Vosk** (Recommended): `./scripts/install-vosk.sh`
-   - **Whisper.cpp**: `./scripts/install-whisper.sh`
-   - **Google Cloud**: Add credentials to `./credentials/google-cloud-key.json`
-
-5. Configure Claude Desktop:
-   - Copy the configuration from `claude_desktop_config.json`
-   - Add to your Claude Desktop config file:
-     - macOS: `~/Library/Application Support/Claude/claude_desktop_config.json`
-     - Windows: `%APPDATA%\Claude\claude_desktop_config.json`
-     - Linux: `~/.config/Claude/claude_desktop_config.json`
-
-6. Start the MCP server:
-```bash
+# Start the server
 npm start
+```
+
+## Claude Desktop Integration
+
+Add to your Claude Desktop config:
+- macOS: `~/Library/Application Support/Claude/claude_desktop_config.json`
+- Windows: `%APPDATA%\Claude\claude_desktop_config.json`
+- Linux: `~/.config/Claude/claude_desktop_config.json`
+
+```json
+{
+  "mcpServers": {
+    "discord-voice": {
+      "command": "docker",
+      "args": ["exec", "-i", "discord-voice-mcp", "node", "/app/src/mcp-server.js"]
+    }
+  }
+}
+```
+
+For local installation, use:
+```json
+{
+  "mcpServers": {
+    "discord-voice": {
+      "command": "node",
+      "args": ["/path/to/discord-voice-mcp/src/mcp-server.js"]
+    }
+  }
+}
 ```
 
 ## Usage in Claude Code
 
-### Start a transcription session:
 ```
-You: Start a voice transcription session for our meeting
+You: Start transcribing the voice channel
+Claude: [Starts voice session and joins channel]
 
-Claude: I'll start a voice transcription session for you.
-[Uses tool: start_voice_session]
-✅ Started voice session: "meeting"
-Now transcribing voice channel audio...
-```
+You: Show me what was said in the last 5 minutes
+Claude: [Retrieves transcript with timestamps]
 
-### Join a Discord voice channel:
-```
-You: Join the voice channel [channel-id] in server [guild-id]
-
-Claude: [Uses tool: join_voice_channel]
-🔊 Joined voice channel
-Ready to transcribe audio using vosk
+You: Stop transcribing
+Claude: [Stops session and leaves channel]
 ```
 
-### Get transcript:
+## Discord Bot Setup
+
+1. Create a bot at https://discord.com/developers/applications
+2. Get your bot token and client ID
+3. Invite bot to server with voice permissions:
+   ```
+   https://discord.com/api/oauth2/authorize?client_id=YOUR_CLIENT_ID&permissions=3145728&scope=bot
+   ```
+
+## Configuration
+
+### Environment Variables
+
+```env
+# Required
+DISCORD_TOKEN=your_bot_token
+DISCORD_CLIENT_ID=your_client_id
+
+# Optional
+DISCORD_GUILD_ID=specific_guild_id
+TRANSCRIPTION_PROVIDER=whisper  # whisper, vosk, or google
+LOG_LEVEL=info
 ```
-You: Show me the transcript from the last 5 minutes
 
-Claude: [Uses tool: get_transcript with lastNMinutes: 5]
-[10:23:45] You: So we need a real-time data pipeline
-[10:23:52] You: It should handle WebSocket connections
-[10:24:03] You: And process events using a queue system
-```
+### Transcription Providers
 
-### Switch transcription provider:
-```
-You: Switch to whisper for better accuracy
+**Whisper.cpp** (Default)
+- Offline, high accuracy
+- Auto-downloads model on first run
+- Models: tiny, base, small, medium, large
 
-Claude: [Uses tool: switch_provider]
-🔄 Switched transcription provider:
-vosk → whisper
-```
+**Vosk** (Alternative)
+- Offline, lower resource usage
+- Real-time streaming
+- Models: small (40MB), medium (128MB), large (1.8GB)
 
-## Transcription Providers
+**Google Cloud** (Cloud-based)
+- Requires service account key in `credentials/google-cloud-key.json`
+- Best accuracy, requires internet
 
-### Vosk (Default)
-- ✅ Completely free and offline
-- ✅ Low resource usage
-- ✅ Real-time streaming
-- ⚡ 50MB - 2GB models
+## Development
 
-### Whisper.cpp
-- ✅ Free and offline
-- ✅ High accuracy
-- ✅ 100+ languages
-- 💾 140MB - 1.5GB models
+```bash
+# Run with hot reload
+npm run dev
 
-### Google Cloud Speech
-- ☁️ Cloud-based processing
-- ✅ Real-time streaming
-- ✅ Speaker diarization
-- 💰 Pay-per-use (free tier available)
+# Run with Docker development mode
+docker-compose -f docker-compose.dev.yml up
 
-## Project Structure
-
-```
-discord-voice-mcp/
-├── src/
-│   ├── mcp-server.js           # MCP server implementation
-│   ├── discord-bot.js          # Discord voice handling
-│   ├── session-manager.js      # Transcript session management
-│   └── services/
-│       └── transcription.js    # Multi-provider transcription
-├── scripts/
-│   ├── setup.sh               # Main setup script
-│   ├── install-vosk.sh        # Vosk model installer
-│   └── install-whisper.sh     # Whisper.cpp installer
-├── models/                    # Transcription models
-├── sessions/                  # Saved sessions
-├── .env                      # Configuration
-└── package.json
+# Access container shell
+docker exec -it discord-voice-mcp /bin/bash
 ```
 
 ## MCP Tools Available
 
 | Tool | Description |
 |------|-------------|
-| `start_voice_session` | Start a new transcription session |
-| `stop_voice_session` | Stop the current session |
-| `get_transcript` | Retrieve session transcript |
-| `join_voice_channel` | Join a Discord voice channel |
-| `leave_voice_channel` | Leave the current channel |
-| `switch_provider` | Change transcription provider |
+| `start_voice_session` | Start transcription session |
+| `stop_voice_session` | Stop current session |
+| `get_transcript` | Retrieve transcript |
+| `join_voice_channel` | Join Discord channel |
+| `leave_voice_channel` | Leave current channel |
 | `list_active_sessions` | Show all sessions |
-| `clear_transcript` | Clear session transcript |
-
-## Configuration
-
-### Environment Variables (.env)
-
-```env
-# Discord
-DISCORD_TOKEN=your_bot_token
-DISCORD_CLIENT_ID=your_client_id
-DISCORD_GUILD_ID=your_guild_id
-
-# Transcription Provider (vosk, whisper, google)
-TRANSCRIPTION_PROVIDER=vosk
-
-# Vosk
-VOSK_MODEL_PATH=./models/vosk-model-en-us-0.22
-
-# Whisper.cpp
-WHISPER_MODEL_PATH=./models/ggml-base.en.bin
-WHISPER_EXECUTABLE=./whisper.cpp/main
-
-# Google Cloud
-GOOGLE_APPLICATION_CREDENTIALS=./credentials/google-cloud-key.json
-```
+| `switch_provider` | Change transcription provider |
+| `clear_transcript` | Clear session data |
 
 ## Troubleshooting
 
-### MCP Server not connecting
-- Check Claude Desktop config path
-- Verify absolute paths in configuration
-- Check logs with `npm start`
+### Bot not joining channel
+- Check bot has voice permissions in Discord
+- Verify DISCORD_TOKEN is correct
+- Ensure bot is in the server
 
-### No audio being transcribed
-- Ensure bot has voice channel permissions
-- Check that bot is not self-deafened
-- Verify transcription provider is initialized
+### No transcription
+- Check Docker logs: `docker-compose logs`
+- Verify models downloaded: `docker exec discord-voice-mcp ls /app/models`
+- Try smaller model if memory limited
 
-### Provider-specific issues
+### MCP not connecting
+- Verify Claude Desktop config path is correct
+- Use absolute paths in configuration
+- Restart Claude Desktop after config changes
 
-**Vosk:**
-- Download appropriate model size for your system
-- Check model path in .env
+## Architecture
 
-**Whisper.cpp:**
-- Ensure build tools are installed (gcc/clang, make)
-- Run `make clean && make` in whisper.cpp directory
-
-**Google Cloud:**
-- Verify service account JSON key
-- Check API quotas and billing
-
-## Development
-
-### Run in development mode:
-```bash
-npm run dev
+```
+Discord Voice → Audio Stream → Transcription Provider → MCP Server → Claude Code
 ```
 
-### Test Discord bot only:
-```bash
-npm run test-bot
-```
-
-### Export session transcripts:
-Sessions are automatically saved to `./sessions/` directory as JSON files.
-
-## Privacy & Security
-
-- 🔒 Never commit `.env` file with tokens
-- 🎙️ Inform users when recording
-- 💾 Sessions stored locally only
-- 🔐 Use environment variables for all credentials
+- **Discord Bot**: Captures voice channel audio using discord.js
+- **Transcription**: Converts audio to text (Whisper/Vosk/Google)
+- **MCP Server**: Exposes transcripts via Model Context Protocol
+- **Session Manager**: Handles transcript storage and retrieval
 
 ## License
 
@@ -249,15 +190,4 @@ MIT
 
 ## Contributing
 
-Contributions welcome! Please submit PRs with:
-- New transcription providers
-- Additional MCP tools
-- Performance improvements
-- Bug fixes
-
-## Support
-
-For issues and questions:
-- Open an issue on GitHub
-- Check existing sessions in `./sessions/` directory
-- Review logs for error messages
+Pull requests welcome! Please keep changes focused and test before submitting.

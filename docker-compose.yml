@@ -2,61 +2,33 @@ version: '3.8'
 
 services:
   discord-voice-mcp:
-    image: ghcr.io/${GITHUB_REPOSITORY:-yourusername/discord-voice-mcp}:${IMAGE_TAG:-latest}
-    build:
-      context: .
-      dockerfile: Dockerfile.base
-    
+    build: .
+    image: discord-voice-mcp:latest
     container_name: discord-voice-mcp
-    
     restart: unless-stopped
     
     environment:
-      # Discord Configuration
+      # Discord Configuration (Required)
       DISCORD_TOKEN: ${DISCORD_TOKEN}
       DISCORD_CLIENT_ID: ${DISCORD_CLIENT_ID}
-      DISCORD_GUILD_ID: ${DISCORD_GUILD_ID}
+      DISCORD_GUILD_ID: ${DISCORD_GUILD_ID:-}
       
-      # Transcription Provider
-      TRANSCRIPTION_PROVIDER: ${PROVIDER:-vosk}
+      # Transcription Configuration
+      TRANSCRIPTION_PROVIDER: ${TRANSCRIPTION_PROVIDER:-whisper}
+      WHISPER_MODEL_NAME: ${WHISPER_MODEL_NAME:-base.en}
+      VOSK_MODEL_SIZE: ${VOSK_MODEL_SIZE:-small}
       
-      # Model Configuration (models downloaded at runtime)
-      VOSK_MODEL_SIZE: ${VOSK_MODEL:-small}
-      WHISPER_MODEL_NAME: ${WHISPER_MODEL:-base.en}
-      AUTO_DOWNLOAD_MODELS: ${AUTO_DOWNLOAD_MODELS:-true}
-      
-      # Model paths (fixed in container)
-      VOSK_MODEL_PATH: /app/models/vosk-model
-      WHISPER_MODEL_PATH: /app/models/whisper-model.bin
-      WHISPER_EXECUTABLE: /app/whisper.cpp/main
-      
-      # Google Cloud Configuration (optional)
-      GOOGLE_APPLICATION_CREDENTIALS: ${GOOGLE_APPLICATION_CREDENTIALS:-/app/credentials/google-cloud-key.json}
-      
-      # Logging
+      # Optional Settings
       LOG_LEVEL: ${LOG_LEVEL:-info}
+      AUTO_DOWNLOAD_MODELS: ${AUTO_DOWNLOAD_MODELS:-true}
     
     volumes:
-      # Persistent data using named volumes
-      - sessions:/app/sessions
-      - exports:/app/exports
-      - logs:/app/logs
-      
-      # Models cache (important for runtime downloads)
+      # Persist models to avoid re-downloading
       - models:/app/models
-      
-      # Google Cloud credentials (optional, bind mount)
+      # Store session transcripts
+      - sessions:/app/sessions
+      # Google Cloud credentials (if using Google provider)
       - ./credentials:/app/credentials:ro
-      
-      # Custom models (optional, bind mount)
-      - ./custom-models:/app/custom-models:ro
-    
-    ports:
-      # WebSocket port (optional, for future features)
-      - "${WS_PORT:-3001}:3000"
-    
-    networks:
-      - mcp-network
     
     # Resource limits
     deploy:
@@ -64,39 +36,9 @@ services:
         limits:
           cpus: '${CPU_LIMIT:-2}'
           memory: ${MEMORY_LIMIT:-2G}
-        reservations:
-          cpus: '${CPU_RESERVE:-0.5}'
-          memory: ${MEMORY_RESERVE:-512M}
-    
-    # Logging configuration
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "10m"
-        max-file: "3"
-
-  # Optional: Nginx reverse proxy for WebSocket
-  nginx-proxy:
-    image: nginx:alpine
-    container_name: discord-mcp-proxy
-    profiles: ["proxy"]
-    ports:
-      - "80:80"
-      - "443:443"
-    volumes:
-      - ./nginx.conf:/etc/nginx/nginx.conf:ro
-      - ./ssl:/etc/nginx/ssl:ro
-    depends_on:
-      - discord-voice-mcp
-    networks:
-      - mcp-network
-
-networks:
-  mcp-network:
-    driver: bridge
 
 volumes:
-  sessions:
-  exports:
-  logs:
   models:
+    name: discord-voice-mcp_models
+  sessions:
+    name: discord-voice-mcp_sessions
