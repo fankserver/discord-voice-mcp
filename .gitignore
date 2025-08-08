@@ -137,3 +137,29 @@ dist
 # Vite logs files
 vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
+# Go binaries
+discord-voice-mcp
+discord-voice-mcp.exe
+*.exe
+dist/
+
+# Go
+*.test
+*.out
+vendor/
+
+# Environment
+.env
+.env.local
+
+# Logs
+*.log
+
+# Models
+models/
+*.bin
+*.gguf
+
+# Sessions
+sessions/
+exports/
