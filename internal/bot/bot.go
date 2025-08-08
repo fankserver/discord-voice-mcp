@@ -64,7 +64,9 @@ func (vb *VoiceBot) JoinChannel(guildID, channelID string) error {
 
 	// Leave current channel if connected
 	if vb.voiceConn != nil {
-		vb.voiceConn.Disconnect()
+		if err := vb.voiceConn.Disconnect(); err != nil {
+			logrus.WithError(err).Debug("Error disconnecting from previous channel")
+		}
 	}
 
 	// Join new channel
@@ -95,7 +97,9 @@ func (vb *VoiceBot) LeaveChannel() {
 	defer vb.mu.Unlock()
 
 	if vb.voiceConn != nil {
-		vb.voiceConn.Disconnect()
+		if err := vb.voiceConn.Disconnect(); err != nil {
+			logrus.WithError(err).Debug("Error disconnecting from voice channel")
+		}
 		vb.voiceConn = nil
 		logrus.Info("Left voice channel")
 	}
@@ -151,25 +155,37 @@ func (vb *VoiceBot) messageCreate(s *discordgo.Session, m *discordgo.MessageCrea
 				"guild_id": m.GuildID,
 				"error":    err,
 			}).Error("Could not find guild in state")
-			s.ChannelMessageSend(m.ChannelID, "Error: Could not retrieve guild information.")
+			if _, err := s.ChannelMessageSend(m.ChannelID, "Error: Could not retrieve guild information."); err != nil {
+				logrus.WithError(err).Debug("Failed to send error message")
+			}
 			return
 		}
 		for _, vs := range g.VoiceStates {
 			if vs.UserID == m.Author.ID {
-				vb.JoinChannel(m.GuildID, vs.ChannelID)
-				s.ChannelMessageSend(m.ChannelID, "Joined voice channel!")
+				if err := vb.JoinChannel(m.GuildID, vs.ChannelID); err != nil {
+					logrus.WithError(err).Error("Failed to join voice channel")
+				}
+				if _, err := s.ChannelMessageSend(m.ChannelID, "Joined voice channel!"); err != nil {
+					logrus.WithError(err).Debug("Failed to send join confirmation")
+				}
 				return
 			}
 		}
-		s.ChannelMessageSend(m.ChannelID, "You need to be in a voice channel!")
+		if _, err := s.ChannelMessageSend(m.ChannelID, "You need to be in a voice channel!"); err != nil {
+			logrus.WithError(err).Debug("Failed to send error message")
+		}
 
 	case "!leave":
 		vb.LeaveChannel()
-		s.ChannelMessageSend(m.ChannelID, "Left voice channel!")
+		if _, err := s.ChannelMessageSend(m.ChannelID, "Left voice channel!"); err != nil {
+			logrus.WithError(err).Debug("Failed to send leave confirmation")
+		}
 
 	case "!status":
 		status := vb.GetStatus()
 		msg := fmt.Sprintf("Status: Connected=%v, InVoice=%v", status["connected"], status["inVoice"])
-		s.ChannelMessageSend(m.ChannelID, msg)
+		if _, err := s.ChannelMessageSend(m.ChannelID, msg); err != nil {
+			logrus.WithError(err).Debug("Failed to send status message")
+		}
 	}
 }

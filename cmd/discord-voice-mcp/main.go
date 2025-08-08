@@ -33,7 +33,7 @@ func init() {
 
 	// Load from environment if not provided
 	if Token == "" {
-		godotenv.Load()
+		_ = godotenv.Load()
 		Token = os.Getenv("DISCORD_TOKEN")
 	}
 	if ChannelID == "" {
@@ -102,7 +102,11 @@ func main() {
 	if err != nil {
 		logrus.WithError(err).Fatal("Error connecting to Discord")
 	}
-	defer voiceBot.Disconnect()
+	defer func() {
+		if err := voiceBot.Disconnect(); err != nil {
+			logrus.WithError(err).Warn("Failed to disconnect voice bot")
+		}
+	}()
 	logrus.Info("Connected to Discord")
 
 	// Auto-join if channel provided

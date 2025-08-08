@@ -58,42 +58,36 @@ func (p *Processor) ProcessVoiceReceive(vc *discordgo.VoiceConnection, sessionMa
 	logrus.Info("Started processing voice receive")
 
 	// Process incoming audio
-	for {
-		select {
-		case packet, ok := <-vc.OpusRecv:
-			if !ok {
-				logrus.Info("Voice receive channel closed")
-				return
-			}
-			
-			// Decode opus to PCM
-			pcm, err := decoder.Decode(packet.Opus, frameSize, false)
-			if err != nil {
-				logrus.WithError(err).Debug("Error decoding opus")
-				continue
-			}
+	for packet := range vc.OpusRecv {
+		// Decode opus to PCM
+		pcm, err := decoder.Decode(packet.Opus, frameSize, false)
+		if err != nil {
+			logrus.WithError(err).Debug("Error decoding opus")
+			continue
+		}
 
-			// Get or create stream for user (using SSRC as ID)
-			stream := p.getOrCreateStream(packet.SSRC, fmt.Sprintf("%d", packet.SSRC))
+		// Get or create stream for user (using SSRC as ID)
+		stream := p.getOrCreateStream(packet.SSRC, fmt.Sprintf("%d", packet.SSRC))
 
-			// Convert PCM to bytes
-			pcmBytes := make([]byte, len(pcm)*2) // samples * 2 bytes per sample
-			for i := 0; i < len(pcm); i++ {
-				binary.LittleEndian.PutUint16(pcmBytes[i*2:], uint16(pcm[i]))
-			}
+		// Convert PCM to bytes
+		pcmBytes := make([]byte, len(pcm)*2) // samples * 2 bytes per sample
+		for i := 0; i < len(pcm); i++ {
+			binary.LittleEndian.PutUint16(pcmBytes[i*2:], uint16(pcm[i]))
+		}
 
-			// Add to buffer
-			stream.mu.Lock()
-			stream.Buffer.Write(pcmBytes)
-			bufferSize := stream.Buffer.Len()
-			stream.mu.Unlock()
+		// Add to buffer
+		stream.mu.Lock()
+		stream.Buffer.Write(pcmBytes)
+		bufferSize := stream.Buffer.Len()
+		stream.mu.Unlock()
 
-			// If buffer is large enough, transcribe
-			if bufferSize > transcriptionBufferSize {
-				go p.transcribeAndClear(stream, sessionManager, activeSessionID)
-			}
+		// If buffer is large enough, transcribe
+		if bufferSize > transcriptionBufferSize {
+			go p.transcribeAndClear(stream, sessionManager, activeSessionID)
 		}
 	}
+	
+	logrus.Info("Voice receive channel closed")
 }
 
 func (p *Processor) getOrCreateStream(ssrc uint32, userID string) *Stream {
