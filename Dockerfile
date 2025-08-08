@@ -35,8 +35,7 @@ COPY --from=builder /app/discord-voice-mcp .
 RUN adduser -D -u 1000 mcp
 USER mcp
 
-# Expose port if needed
-EXPOSE 3000
+# Note: No ports exposed as this uses stdin/stdout for MCP protocol
 
 # Run the binary
 CMD ["./discord-voice-mcp"]

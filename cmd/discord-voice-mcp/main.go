@@ -7,6 +7,7 @@ import (
 	"os/signal"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/fankserver/discord-voice-mcp/internal/audio"
 	"github.com/fankserver/discord-voice-mcp/internal/bot"
@@ -67,6 +68,10 @@ func main() {
 		logrus.Fatal("Discord token is required. Use -token flag or DISCORD_TOKEN env var")
 	}
 
+	// Set up signal handling with context for graceful shutdown
+	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM, os.Interrupt)
+	defer cancel()
+
 	// Create session manager
 	sessionManager := session.NewManager()
 	logrus.Debug("Session manager created")
@@ -90,7 +95,7 @@ func main() {
 	if MCPMode {
 		mcpServer := mcp.NewServer(voiceBot, sessionManager)
 		go func() {
-			if err := mcpServer.Start(context.Background()); err != nil {
+			if err := mcpServer.Start(ctx); err != nil {
 				logrus.WithError(err).Error("MCP server error")
 			}
 		}()
@@ -124,11 +129,13 @@ func main() {
 		}
 	}
 
-	// Wait for interrupt
+	// Wait for context cancellation
 	logrus.Info("Bot is running. Press CTRL-C to exit.")
-	sc := make(chan os.Signal, 1)
-	signal.Notify(sc, syscall.SIGINT, syscall.SIGTERM, os.Interrupt)
-	<-sc
+	<-ctx.Done()
 
 	logrus.Info("Shutting down gracefully...")
+	// Give components time to clean up
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer shutdownCancel()
+	<-shutdownCtx.Done()
 }

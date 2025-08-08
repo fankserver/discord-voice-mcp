@@ -47,9 +47,9 @@ func (wt *WhisperTranscriber) Transcribe(audio []byte) (string, error) {
 
 	output, err := whisperCmd.Output()
 	if err != nil {
-		logrus.WithError(err).Debug("Whisper command failed")
-		// For PoC, just return empty on error
-		return "", nil
+		logrus.WithError(err).Warn("Whisper command failed")
+		// Return error to allow caller to handle appropriately
+		return "", fmt.Errorf("whisper transcription failed: %w", err)
 	}
 
 	return string(output), nil

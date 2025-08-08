@@ -87,8 +87,7 @@ audio.go          - Audio capture & transcription pipeline
 
 ### 4. Production Ready
 - **Structured logging**: Built-in log levels
-- **Graceful shutdown**: Clean resource cleanup
-- **Health checks**: Simple HTTP endpoint
+- **Graceful shutdown**: Clean resource cleanup with context cancellation
 - **Metrics**: Runtime profiling available
 
 ## 🛠️ Development

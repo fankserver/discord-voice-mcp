@@ -20,7 +20,7 @@ clean:
 
 # Build Docker image (Go version)
 docker-build:
-	docker build -f Dockerfile -t discord-voice-mcp:go .
+	docker build -t discord-voice-mcp:go .
 
 # Run Docker container (Go version)
 docker-run:
@@ -68,10 +68,10 @@ build-all:
 bench:
 	@echo "=== Performance Comparison ==="
 	@echo "Go version startup:"
-	@time -p ./discord-voice-mcp -version 2>/dev/null || echo "Not built"
+	@time -p ./discord-voice-mcp --help 2>&1 | head -1 || echo "Not built"
 	@echo ""
 	@echo "Node.js version startup:"
-	@time -p node src/mcp-server.js -version 2>/dev/null || echo "Not available"
+	@time -p node src/mcp-server.js --help 2>&1 | head -1 || echo "Not available"
 
 help:
 	@echo "Discord Voice MCP - Go Version"
