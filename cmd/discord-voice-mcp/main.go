@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"os"
 	"os/signal"
@@ -88,7 +89,11 @@ func main() {
 	// Start MCP server if requested
 	if MCPMode {
 		mcpServer := mcp.NewServer(voiceBot, sessionManager)
-		go mcpServer.Start()
+		go func() {
+			if err := mcpServer.Start(context.Background()); err != nil {
+				logrus.WithError(err).Error("MCP server error")
+			}
+		}()
 		logrus.Info("MCP server started")
 	}
 
