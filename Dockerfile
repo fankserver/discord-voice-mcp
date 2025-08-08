@@ -6,6 +6,7 @@ RUN apt-get update && apt-get install -y \
     python3 \
     python3-pip \
     build-essential \
+    cmake \
     git \
     wget \
     ffmpeg \
@@ -16,8 +17,8 @@ RUN apt-get update && apt-get install -y \
 WORKDIR /app
 
 # Copy package files and install dependencies
-COPY package*.json ./
-RUN npm ci --only=production
+COPY package.json ./
+RUN npm install --omit=dev
 
 # Copy application code
 COPY src/ ./src/
@@ -33,7 +34,7 @@ RUN mkdir -p models sessions exports logs whisper.cpp
 RUN git clone https://github.com/ggerganov/whisper.cpp.git /tmp/whisper.cpp && \
     cd /tmp/whisper.cpp && \
     make && \
-    cp /tmp/whisper.cpp/main /app/whisper.cpp/main && \
+    cp /tmp/whisper.cpp/build/bin/whisper-cli /app/whisper.cpp/main && \
     cp -r /tmp/whisper.cpp/models/*.sh /app/whisper.cpp/ && \
     rm -rf /tmp/whisper.cpp
 
@@ -46,11 +47,10 @@ ENV NODE_ENV=production \
     PORT=3000 \
     AUTO_DOWNLOAD_MODELS=true
 
-# Create non-root user
-RUN useradd -m -u 1000 mcp && \
-    chown -R mcp:mcp /app
+# Create non-root user (reuse existing node user)
+RUN chown -R node:node /app
 
-USER mcp
+USER node
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=5s --start-period=60s --retries=3 \
