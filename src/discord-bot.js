@@ -24,11 +24,10 @@ export class DiscordVoiceBot extends EventEmitter {
     super();
     this.transcriptionService = transcriptionService;
     this.client = null;
-    this.connections = new Map();
-    this.activeRecordings = new Map();
-    this.currentConnection = null;
-    this.currentGuildId = null;
-    this.currentSessionId = null;
+    this.connections = new Map(); // guildId -> connection
+    this.activeRecordings = new Map(); // userId -> recording state
+    this.guildSessions = new Map(); // guildId -> sessionId
+    // Remove single connection tracking in favor of per-guild tracking
   }
 
   async initialize() {
@@ -83,8 +82,6 @@ export class DiscordVoiceBot extends EventEmitter {
     await entersState(connection, VoiceConnectionStatus.Ready, 30_000);
     
     this.connections.set(guildId, connection);
-    this.currentConnection = connection;
-    this.currentGuildId = guildId;
     
     // Set up voice receiver
     this.setupVoiceReceiver(connection, guild);
@@ -110,12 +107,12 @@ export class DiscordVoiceBot extends EventEmitter {
       
       logger.debug(`User started speaking: ${member.displayName}`);
       
-      // Start recording this user
-      this.startRecording(receiver, userId, member.displayName);
+      // Start recording this user with guild context
+      this.startRecording(receiver, userId, member.displayName, guild.id);
     });
   }
 
-  startRecording(receiver, userId, username) {
+  startRecording(receiver, userId, username, guildId) {
     // Subscribe to user's audio stream
     const opusStream = receiver.subscribe(userId, {
       end: {
@@ -162,12 +159,13 @@ export class DiscordVoiceBot extends EventEmitter {
         if (transcript && transcript.trim().length > 0) {
           logger.info(`Transcription from ${username}: ${transcript}`);
           
-          // Emit transcription event
+          // Emit transcription event with guild context
           this.emit('transcription', {
             userId,
             username,
             text: transcript,
-            sessionId: this.currentSessionId
+            sessionId: this.guildSessions.get(guildId),
+            guildId
           });
         }
       } catch (error) {
@@ -195,19 +193,28 @@ export class DiscordVoiceBot extends EventEmitter {
     if (connection) {
       connection.destroy();
       this.connections.delete(guildId);
-      
-      if (this.currentGuildId === guildId) {
-        this.currentConnection = null;
-        this.currentGuildId = null;
-      }
+      this.guildSessions.delete(guildId);
       
       logger.info(`Left voice channel in guild ${guildId}`);
     }
   }
 
-  setCurrentSession(sessionId) {
-    this.currentSessionId = sessionId;
-    logger.info(`Current session set to: ${sessionId}`);
+  setSessionForGuild(guildId, sessionId) {
+    if (sessionId) {
+      this.guildSessions.set(guildId, sessionId);
+      logger.info(`Session ${sessionId} set for guild ${guildId}`);
+    } else {
+      this.guildSessions.delete(guildId);
+      logger.info(`Session cleared for guild ${guildId}`);
+    }
+  }
+
+  getSessionForGuild(guildId) {
+    return this.guildSessions.get(guildId);
+  }
+
+  getCurrentConnection(guildId) {
+    return this.connections.get(guildId);
   }
 
   async cleanup() {

@@ -25,7 +25,7 @@ COPY package*.json ./
 RUN npm install
 
 # Create necessary directories
-RUN mkdir -p models temp sessions exports credentials logs
+RUN mkdir -p models temp sessions exports credentials logs whisper.cpp
 
 # Download models based on build arguments
 ARG VOSK_MODEL=small

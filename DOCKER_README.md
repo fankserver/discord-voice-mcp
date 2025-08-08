@@ -349,12 +349,22 @@ docker inspect discord-voice-mcp --format='{{json .State.Health}}' | jq
 
 ### Backup sessions
 
+For named volumes (default in docker-compose.yml):
 ```bash
 # Backup
-docker run --rm -v discord_sessions:/data -v $(pwd):/backup alpine tar czf /backup/sessions-backup.tar.gz -C /data .
+docker run --rm -v discord-voice-mcp_sessions:/data -v $(pwd):/backup alpine tar czf /backup/sessions-backup.tar.gz -C /data .
 
 # Restore
-docker run --rm -v discord_sessions:/data -v $(pwd):/backup alpine tar xzf /backup/sessions-backup.tar.gz -C /data
+docker run --rm -v discord-voice-mcp_sessions:/data -v $(pwd):/backup alpine tar xzf /backup/sessions-backup.tar.gz -C /data
+```
+
+For bind mounts (if using ./sessions):
+```bash
+# Backup
+tar czf sessions-backup.tar.gz ./sessions
+
+# Restore
+tar xzf sessions-backup.tar.gz
 ```
 
 ## 🎉 Success!

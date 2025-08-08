@@ -61,9 +61,9 @@ RUN useradd -m -u 1000 mcp && \
 
 USER mcp
 
-# Health check
-HEALTHCHECK --interval=30s --timeout=3s --start-period=60s --retries=3 \
-    CMD node -e "console.log('Health check passed')" || exit 1
+# Health check - verify node process is running
+HEALTHCHECK --interval=30s --timeout=5s --start-period=60s --retries=3 \
+    CMD pgrep -f "node.*mcp-server.js" > /dev/null || exit 1
 
 # Expose port for WebSocket connections
 EXPOSE 3000

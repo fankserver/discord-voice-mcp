@@ -38,10 +38,10 @@ services:
       GOOGLE_APPLICATION_CREDENTIALS: ${GOOGLE_APPLICATION_CREDENTIALS:-/app/credentials/google-cloud-key.json}
     
     volumes:
-      # Mount source code for hot reload
-      - ./src:/app/src:ro
-      - ./package.json:/app/package.json:ro
-      - ./package-lock.json:/app/package-lock.json:ro
+      # Mount source code for hot reload (read-write for development)
+      - ./src:/app/src
+      - ./package.json:/app/package.json
+      - ./package-lock.json:/app/package-lock.json
       
       # Persistent data
       - ./sessions:/app/sessions
@@ -63,8 +63,7 @@ services:
     networks:
       - mcp-network
     
-    # Enable Node.js inspector
-    command: ["node", "--inspect=0.0.0.0:9229", "src/mcp-server.js"]
+    # Node.js inspector is enabled in Dockerfile.dev's CMD with nodemon
     
     # Resource limits (more generous for dev)
     deploy:

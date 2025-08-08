@@ -295,9 +295,9 @@ class DiscordVoiceMCP {
   async startVoiceSession(args) {
     const session = this.sessionManager.createSession(args.sessionName);
     
-    // Link session to bot
-    if (this.bot.currentConnection) {
-      this.bot.setCurrentSession(session.id);
+    // Link session to bot for the specified guild
+    if (args.guildId) {
+      this.bot.setSessionForGuild(args.guildId, session.id);
     }
 
     logger.info(`Started voice session: ${session.id}`);
@@ -313,17 +313,20 @@ class DiscordVoiceMCP {
   }
 
   async stopVoiceSession(args) {
-    const sessionId = args.sessionId || this.bot.currentSessionId;
+    const sessionId = args.sessionId;
     if (!sessionId) {
-      throw new Error("No active session to stop");
+      throw new Error("Session ID required to stop session");
     }
     
     const transcript = this.sessionManager.getTranscript(sessionId);
     const wordCount = transcript.split(' ').filter(w => w.length > 0).length;
     this.sessionManager.endSession(sessionId);
     
-    if (this.bot.currentSessionId === sessionId) {
-      this.bot.setCurrentSession(null);
+    // Clear session from any guilds using it
+    for (const [guildId, guildSessionId] of this.bot.guildSessions) {
+      if (guildSessionId === sessionId) {
+        this.bot.setSessionForGuild(guildId, null);
+      }
     }
     
     logger.info(`Stopped voice session: ${sessionId}`);
@@ -339,9 +342,9 @@ class DiscordVoiceMCP {
   }
 
   async getTranscript(args) {
-    const sessionId = args.sessionId || this.bot.currentSessionId;
+    const sessionId = args.sessionId;
     if (!sessionId) {
-      throw new Error("No session specified and no active session");
+      throw new Error("Session ID required");
     }
     
     const transcript = this.sessionManager.getTranscript(
@@ -404,19 +407,18 @@ class DiscordVoiceMCP {
       content: [
         {
           type: "text",
-          text: `🔊 Joined voice channel ${args.channelId}\nReady to transcribe audio using ${this.currentProvider}`
+          text: `🔊 Joined voice channel ${args.channelId} in guild ${args.guildId}\nReady to transcribe audio using ${this.currentProvider}`
         }
       ]
     };
   }
 
   async leaveVoiceChannel(args) {
-    const guildId = args.guildId || this.bot.currentGuildId;
-    if (!guildId) {
-      throw new Error("No guild ID specified and not in a voice channel");
+    if (!args.guildId) {
+      throw new Error("Guild ID required");
     }
     
-    await this.bot.leaveChannel(guildId);
+    await this.bot.leaveChannel(args.guildId);
     
     return {
       content: [

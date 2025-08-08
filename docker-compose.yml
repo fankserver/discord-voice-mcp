@@ -37,15 +37,18 @@ services:
       LOG_LEVEL: ${LOG_LEVEL:-info}
     
     volumes:
-      # Persistent data
-      - ./sessions:/app/sessions
-      - ./exports:/app/exports
-      - ./logs:/app/logs
+      # Persistent data using named volumes
+      - sessions:/app/sessions
+      - exports:/app/exports
+      - logs:/app/logs
       
-      # Google Cloud credentials (optional)
+      # Models cache (important for runtime downloads)
+      - models:/app/models
+      
+      # Google Cloud credentials (optional, bind mount)
       - ./credentials:/app/credentials:ro
       
-      # Custom models (optional)
+      # Custom models (optional, bind mount)
       - ./custom-models:/app/custom-models:ro
     
     ports:
@@ -96,3 +99,4 @@ volumes:
   sessions:
   exports:
   logs:
+  models:

@@ -24,7 +24,7 @@ docker run -d \
   -e DISCORD_CLIENT_ID="your-client-id" \
   -e TRANSCRIPTION_PROVIDER="vosk" \
   -v $(pwd)/models:/app/models \
-  ghcr.io/yourusername/discord-voice-mcp:latest
+  ghcr.io/fankserver/discord-voice-mcp:latest
 ```
 
 See [GHCR_USAGE.md](GHCR_USAGE.md) for using pre-built images.
