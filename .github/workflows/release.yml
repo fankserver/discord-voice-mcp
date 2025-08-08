@@ -1,0 +1,156 @@
+name: Release
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  build-all-variants:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+
+    strategy:
+      matrix:
+        include:
+          # Default variant (Vosk small)
+          - provider: vosk
+            vosk_model: small
+            tag_suffix: ''
+            is_default: true
+          
+          # All Vosk variants
+          - provider: vosk
+            vosk_model: small
+            tag_suffix: vosk-small
+          - provider: vosk
+            vosk_model: medium
+            tag_suffix: vosk-medium
+          - provider: vosk
+            vosk_model: large
+            tag_suffix: vosk-large
+          
+          # All Whisper variants
+          - provider: whisper
+            whisper_model: tiny.en
+            tag_suffix: whisper-tiny
+          - provider: whisper
+            whisper_model: base.en
+            tag_suffix: whisper-base
+          - provider: whisper
+            whisper_model: small.en
+            tag_suffix: whisper-small
+          - provider: whisper
+            whisper_model: medium.en
+            tag_suffix: whisper-medium
+          - provider: whisper
+            whisper_model: large-v3
+            tag_suffix: whisper-large
+          
+          # Google Cloud variant
+          - provider: google
+            tag_suffix: google
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Log in to Docker Hub
+        if: github.event_name == 'release'
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: |
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+            ${{ github.event_name == 'release' && format('docker.io/{0}', github.repository) || '' }}
+          flavor: |
+            latest=${{ matrix.is_default == true }}
+            suffix=${{ matrix.tag_suffix != '' && format('-{0}', matrix.tag_suffix) || '' }}
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
+            type=raw,value=latest,enable=${{ matrix.is_default == true }}
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64,linux/arm/v7
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          build-args: |
+            PROVIDER=${{ matrix.provider }}
+            VOSK_MODEL=${{ matrix.vosk_model }}
+            WHISPER_MODEL=${{ matrix.whisper_model }}
+
+  create-manifest:
+    needs: build-all-variants
+    runs-on: ubuntu-latest
+    if: github.event_name == 'release'
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create and push manifest
+        run: |
+          # Get the version from the release tag
+          VERSION=${GITHUB_REF#refs/tags/}
+          
+          # Create a manifest list for easy provider selection
+          docker manifest create ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:providers \
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${VERSION}-vosk-small \
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${VERSION}-whisper-base \
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${VERSION}-google
+          
+          docker manifest push ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:providers
+          
+          # Annotate with provider information
+          docker manifest annotate ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:providers \
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${VERSION}-vosk-small \
+            --os-features "provider=vosk,model=small"
+          
+          docker manifest annotate ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:providers \
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${VERSION}-whisper-base \
+            --os-features "provider=whisper,model=base.en"
+          
+          docker manifest annotate ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:providers \
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${VERSION}-google \
+            --os-features "provider=google"

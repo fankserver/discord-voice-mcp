@@ -1,0 +1,88 @@
+version: '3.8'
+
+services:
+  discord-voice-mcp-dev:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+      args:
+        PROVIDER: ${PROVIDER:-vosk}
+        VOSK_MODEL: ${VOSK_MODEL:-small}
+        WHISPER_MODEL: ${WHISPER_MODEL:-base.en}
+    
+    container_name: discord-voice-mcp-dev
+    
+    restart: unless-stopped
+    
+    environment:
+      # Discord Configuration
+      DISCORD_TOKEN: ${DISCORD_TOKEN}
+      DISCORD_CLIENT_ID: ${DISCORD_CLIENT_ID}
+      DISCORD_GUILD_ID: ${DISCORD_GUILD_ID}
+      
+      # Transcription Provider
+      TRANSCRIPTION_PROVIDER: ${PROVIDER:-vosk}
+      
+      # Development mode
+      NODE_ENV: development
+      LOG_LEVEL: debug
+      
+      # Vosk Configuration
+      VOSK_MODEL_PATH: /app/models/vosk-model
+      
+      # Whisper Configuration
+      WHISPER_MODEL_PATH: /app/models/ggml-${WHISPER_MODEL:-base.en}.bin
+      WHISPER_EXECUTABLE: /app/whisper.cpp/main
+      
+      # Google Cloud Configuration
+      GOOGLE_APPLICATION_CREDENTIALS: ${GOOGLE_APPLICATION_CREDENTIALS:-/app/credentials/google-cloud-key.json}
+    
+    volumes:
+      # Mount source code for hot reload
+      - ./src:/app/src:ro
+      - ./package.json:/app/package.json:ro
+      - ./package-lock.json:/app/package-lock.json:ro
+      
+      # Persistent data
+      - ./sessions:/app/sessions
+      - ./exports:/app/exports
+      - ./logs:/app/logs
+      
+      # Google Cloud credentials (optional)
+      - ./credentials:/app/credentials:ro
+      
+      # Custom models (optional)
+      - ./custom-models:/app/custom-models:ro
+    
+    ports:
+      # WebSocket port
+      - "${WS_PORT:-3001}:3000"
+      # Node.js debugger port
+      - "9229:9229"
+    
+    networks:
+      - mcp-network
+    
+    # Enable Node.js inspector
+    command: ["node", "--inspect=0.0.0.0:9229", "src/mcp-server.js"]
+    
+    # Resource limits (more generous for dev)
+    deploy:
+      resources:
+        limits:
+          cpus: '4'
+          memory: 4G
+        reservations:
+          cpus: '1'
+          memory: 1G
+    
+    # Logging configuration
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "5"
+
+networks:
+  mcp-network:
+    driver: bridge

@@ -1,0 +1,51 @@
+{
+  "name": "discord-voice-mcp",
+  "version": "1.0.0",
+  "description": "Discord Voice Transcription MCP Server for Claude Code",
+  "type": "module",
+  "main": "src/mcp-server.js",
+  "bin": {
+    "discord-voice-mcp": "./src/mcp-server.js"
+  },
+  "scripts": {
+    "start": "node src/mcp-server.js",
+    "dev": "nodemon src/mcp-server.js",
+    "test-bot": "node src/discord-bot.js",
+    "setup": "node scripts/setup.js",
+    "download-models": "bash scripts/download-models.sh"
+  },
+  "dependencies": {
+    "@discordjs/opus": "^0.9.0",
+    "@discordjs/voice": "^0.16.1",
+    "@google-cloud/speech": "^6.3.0",
+    "@modelcontextprotocol/sdk": "^1.0.0",
+    "discord.js": "^14.14.1",
+    "dotenv": "^16.4.1",
+    "prism-media": "^1.3.5",
+    "uuid": "^9.0.1",
+    "vosk": "^0.3.39",
+    "winston": "^3.11.0",
+    "ws": "^8.16.0",
+    "zod": "^3.22.4"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "nodemon": "^3.0.3"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "keywords": [
+    "discord",
+    "voice",
+    "transcription",
+    "mcp",
+    "claude",
+    "speech-to-text",
+    "vosk",
+    "whisper",
+    "google-cloud"
+  ],
+  "author": "",
+  "license": "MIT"
+}

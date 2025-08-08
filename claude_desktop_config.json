@@ -1,0 +1,18 @@
+{
+  "mcpServers": {
+    "discord-voice": {
+      "command": "node",
+      "args": [
+        "/absolute/path/to/discord-voice-mcp/src/mcp-server.js"
+      ],
+      "env": {
+        "DISCORD_TOKEN": "your-discord-bot-token",
+        "TRANSCRIPTION_PROVIDER": "vosk",
+        "VOSK_MODEL_PATH": "./models/vosk-model-en-us-0.22",
+        "WHISPER_MODEL_PATH": "./models/ggml-base.en.bin",
+        "WHISPER_EXECUTABLE": "./whisper.cpp/main",
+        "GOOGLE_APPLICATION_CREDENTIALS": "./credentials/google-cloud-key.json"
+      }
+    }
+  }
+}

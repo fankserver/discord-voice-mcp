@@ -1,0 +1,76 @@
+# Optimized Dockerfile - Downloads models at runtime based on environment variables
+FROM node:24-slim
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    python3 \
+    python3-pip \
+    build-essential \
+    git \
+    wget \
+    unzip \
+    ffmpeg \
+    curl \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Copy package files
+COPY package*.json ./
+
+# Install Node dependencies
+RUN npm ci --only=production
+
+# Copy application code
+COPY src/ ./src/
+COPY scripts/ ./scripts/
+
+# Make scripts executable
+RUN chmod +x scripts/*.sh
+
+# Create necessary directories
+RUN mkdir -p models temp sessions exports credentials logs whisper.cpp
+
+# Install model download script
+COPY scripts/download-models-runtime.sh /app/scripts/
+RUN chmod +x /app/scripts/download-models-runtime.sh
+
+# Build whisper.cpp (without models)
+RUN git clone https://github.com/ggerganov/whisper.cpp.git /tmp/whisper.cpp && \
+    cd /tmp/whisper.cpp && \
+    make && \
+    cp /tmp/whisper.cpp/main /app/whisper.cpp/main && \
+    cp -r /tmp/whisper.cpp/models/*.sh /app/whisper.cpp/ && \
+    rm -rf /tmp/whisper.cpp
+
+# Set environment variables with defaults
+ENV NODE_ENV=production \
+    TRANSCRIPTION_PROVIDER=vosk \
+    VOSK_MODEL_SIZE=small \
+    WHISPER_MODEL_NAME=base.en \
+    VOSK_MODEL_PATH=/app/models/vosk-model \
+    WHISPER_MODEL_PATH=/app/models/whisper-model.bin \
+    WHISPER_EXECUTABLE=/app/whisper.cpp/main \
+    PORT=3000 \
+    AUTO_DOWNLOAD_MODELS=true
+
+# Create non-root user
+RUN useradd -m -u 1000 mcp && \
+    chown -R mcp:mcp /app
+
+USER mcp
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=3s --start-period=60s --retries=3 \
+    CMD node -e "console.log('Health check passed')" || exit 1
+
+# Expose port for WebSocket connections
+EXPOSE 3000
+
+# Use entrypoint script that downloads models on first run
+COPY --chown=mcp:mcp scripts/docker-entrypoint.sh /app/
+RUN chmod +x /app/docker-entrypoint.sh
+
+ENTRYPOINT ["/app/docker-entrypoint.sh"]
+CMD ["node", "src/mcp-server.js"]

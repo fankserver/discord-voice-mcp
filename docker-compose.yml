@@ -1,0 +1,98 @@
+version: '3.8'
+
+services:
+  discord-voice-mcp:
+    image: ghcr.io/${GITHUB_REPOSITORY:-yourusername/discord-voice-mcp}:${IMAGE_TAG:-latest}
+    build:
+      context: .
+      dockerfile: Dockerfile.base
+    
+    container_name: discord-voice-mcp
+    
+    restart: unless-stopped
+    
+    environment:
+      # Discord Configuration
+      DISCORD_TOKEN: ${DISCORD_TOKEN}
+      DISCORD_CLIENT_ID: ${DISCORD_CLIENT_ID}
+      DISCORD_GUILD_ID: ${DISCORD_GUILD_ID}
+      
+      # Transcription Provider
+      TRANSCRIPTION_PROVIDER: ${PROVIDER:-vosk}
+      
+      # Model Configuration (models downloaded at runtime)
+      VOSK_MODEL_SIZE: ${VOSK_MODEL:-small}
+      WHISPER_MODEL_NAME: ${WHISPER_MODEL:-base.en}
+      AUTO_DOWNLOAD_MODELS: ${AUTO_DOWNLOAD_MODELS:-true}
+      
+      # Model paths (fixed in container)
+      VOSK_MODEL_PATH: /app/models/vosk-model
+      WHISPER_MODEL_PATH: /app/models/whisper-model.bin
+      WHISPER_EXECUTABLE: /app/whisper.cpp/main
+      
+      # Google Cloud Configuration (optional)
+      GOOGLE_APPLICATION_CREDENTIALS: ${GOOGLE_APPLICATION_CREDENTIALS:-/app/credentials/google-cloud-key.json}
+      
+      # Logging
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    
+    volumes:
+      # Persistent data
+      - ./sessions:/app/sessions
+      - ./exports:/app/exports
+      - ./logs:/app/logs
+      
+      # Google Cloud credentials (optional)
+      - ./credentials:/app/credentials:ro
+      
+      # Custom models (optional)
+      - ./custom-models:/app/custom-models:ro
+    
+    ports:
+      # WebSocket port (optional, for future features)
+      - "${WS_PORT:-3001}:3000"
+    
+    networks:
+      - mcp-network
+    
+    # Resource limits
+    deploy:
+      resources:
+        limits:
+          cpus: '${CPU_LIMIT:-2}'
+          memory: ${MEMORY_LIMIT:-2G}
+        reservations:
+          cpus: '${CPU_RESERVE:-0.5}'
+          memory: ${MEMORY_RESERVE:-512M}
+    
+    # Logging configuration
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # Optional: Nginx reverse proxy for WebSocket
+  nginx-proxy:
+    image: nginx:alpine
+    container_name: discord-mcp-proxy
+    profiles: ["proxy"]
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./ssl:/etc/nginx/ssl:ro
+    depends_on:
+      - discord-voice-mcp
+    networks:
+      - mcp-network
+
+networks:
+  mcp-network:
+    driver: bridge
+
+volumes:
+  sessions:
+  exports:
+  logs:
