@@ -2,12 +2,12 @@ package bot
 
 import (
 	"fmt"
-	"log"
 	"sync"
 
 	"github.com/bwmarrin/discordgo"
 	"github.com/fankserver/discord-voice-mcp/internal/audio"
 	"github.com/fankserver/discord-voice-mcp/internal/session"
+	"github.com/sirupsen/logrus"
 )
 
 // VoiceBot manages Discord voice connections
@@ -77,7 +77,11 @@ func (vb *VoiceBot) JoinChannel(guildID, channelID string) error {
 
 	// Start a new session
 	sessionID := vb.sessions.CreateSession(guildID, channelID)
-	log.Printf("Started session %s for guild %s channel %s", sessionID, guildID, channelID)
+	logrus.WithFields(logrus.Fields{
+		"session_id": sessionID,
+		"guild_id":   guildID,
+		"channel_id": channelID,
+	}).Info("Started voice session")
 
 	// Start processing voice
 	go vb.audioProcessor.ProcessVoiceReceive(vc, vb.sessions, sessionID)
@@ -93,7 +97,7 @@ func (vb *VoiceBot) LeaveChannel() {
 	if vb.voiceConn != nil {
 		vb.voiceConn.Disconnect()
 		vb.voiceConn = nil
-		log.Println("Left voice channel")
+		logrus.Info("Left voice channel")
 	}
 }
 
@@ -118,13 +122,16 @@ func (vb *VoiceBot) GetStatus() map[string]interface{} {
 // Event handlers
 
 func (vb *VoiceBot) ready(s *discordgo.Session, event *discordgo.Ready) {
-	log.Printf("Bot is ready! Username: %s#%s", s.State.User.Username, s.State.User.Discriminator)
+	logrus.WithFields(logrus.Fields{
+		"username":      s.State.User.Username,
+		"discriminator": s.State.User.Discriminator,
+	}).Info("Bot is ready")
 }
 
 func (vb *VoiceBot) voiceStateUpdate(s *discordgo.Session, vsu *discordgo.VoiceStateUpdate) {
 	// Handle voice state updates if needed
 	if vsu.UserID == s.State.User.ID {
-		log.Printf("Bot voice state updated: Channel %s", vsu.ChannelID)
+		logrus.WithField("channel_id", vsu.ChannelID).Debug("Bot voice state updated")
 	}
 }
 
@@ -140,7 +147,10 @@ func (vb *VoiceBot) messageCreate(s *discordgo.Session, m *discordgo.MessageCrea
 		// Get user's voice channel
 		g, err := s.State.Guild(m.GuildID)
 		if err != nil || g == nil {
-			log.Printf("Could not find guild %s in state: %v", m.GuildID, err)
+			logrus.WithFields(logrus.Fields{
+				"guild_id": m.GuildID,
+				"error":    err,
+			}).Error("Could not find guild in state")
 			s.ChannelMessageSend(m.ChannelID, "Error: Could not retrieve guild information.")
 			return
 		}

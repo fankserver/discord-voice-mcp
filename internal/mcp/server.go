@@ -4,11 +4,11 @@ import (
 	"bufio"
 	"encoding/json"
 	"fmt"
-	"log"
 	"os"
 
 	"github.com/fankserver/discord-voice-mcp/internal/bot"
 	"github.com/fankserver/discord-voice-mcp/internal/session"
+	"github.com/sirupsen/logrus"
 )
 
 // Server implements the MCP server protocol
@@ -31,7 +31,7 @@ func NewServer(voiceBot *bot.VoiceBot, sessionManager *session.Manager) *Server 
 
 // Start begins the MCP server loop
 func (s *Server) Start() {
-	log.Println("MCP Server started")
+	logrus.Info("MCP Server started")
 
 	// Send initialization
 	s.sendMessage(map[string]interface{}{
@@ -96,7 +96,7 @@ func (s *Server) Start() {
 
 		var msg map[string]interface{}
 		if err := json.Unmarshal([]byte(line), &msg); err != nil {
-			log.Printf("Error parsing message: %v", err)
+			logrus.WithError(err).Debug("Error parsing MCP message")
 			continue
 		}
 
@@ -127,12 +127,12 @@ func (s *Server) handleMessage(msg map[string]interface{}) {
 	case "tools/call":
 		params, ok := msg["params"].(map[string]interface{})
 		if !ok {
-			log.Printf("Invalid params in tools/call")
+			logrus.Warn("Invalid params in tools/call")
 			return
 		}
 		toolName, ok := params["name"].(string)
 		if !ok {
-			log.Printf("Invalid tool name in tools/call")
+			logrus.Warn("Invalid tool name in tools/call")
 			return
 		}
 		toolArgs, _ := params["arguments"].(map[string]interface{})
@@ -208,7 +208,7 @@ func (s *Server) executeTool(name string, args map[string]interface{}) interface
 func (s *Server) sendMessage(msg map[string]interface{}) {
 	data, err := json.Marshal(msg)
 	if err != nil {
-		log.Printf("failed to marshal MCP message: %v", err)
+		logrus.WithError(err).Error("Failed to marshal MCP message")
 		return
 	}
 	s.writer.Write(data)

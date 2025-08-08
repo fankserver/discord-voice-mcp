@@ -35,7 +35,7 @@ go.work.sum
 .DS_Store
 
 # Project binaries
-discord-voice-mcp
+/discord-voice-mcp
 dist/
 
 # Logs
@@ -53,3 +53,6 @@ exports/
 # Temporary files
 tmp/
 temp/
+
+# Test scripts
+test-logging.sh

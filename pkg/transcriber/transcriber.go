@@ -3,8 +3,9 @@ package transcriber
 import (
 	"bytes"
 	"fmt"
-	"log"
 	"os/exec"
+
+	"github.com/sirupsen/logrus"
 )
 
 // Transcriber interface for different transcription providers
@@ -45,7 +46,7 @@ func (wt *WhisperTranscriber) Transcribe(audio []byte) (string, error) {
 
 	output, err := whisperCmd.Output()
 	if err != nil {
-		log.Printf("whisper command failed: %v", err)
+		logrus.WithError(err).Debug("Whisper command failed")
 		// For PoC, just return empty on error
 		return "", nil
 	}

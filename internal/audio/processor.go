@@ -4,12 +4,12 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
-	"log"
 	"sync"
 
 	"github.com/bwmarrin/discordgo"
 	"github.com/fankserver/discord-voice-mcp/internal/session"
 	"github.com/fankserver/discord-voice-mcp/pkg/transcriber"
+	"github.com/sirupsen/logrus"
 	"layeh.com/gopus"
 )
 
@@ -51,25 +51,25 @@ func (p *Processor) ProcessVoiceReceive(vc *discordgo.VoiceConnection, sessionMa
 	// Create opus decoder
 	decoder, err := gopus.NewDecoder(sampleRate, channels)
 	if err != nil {
-		log.Printf("Error creating opus decoder: %v", err)
+		logrus.WithError(err).Error("Error creating opus decoder")
 		return
 	}
 
-	log.Println("Started processing voice receive")
+	logrus.Info("Started processing voice receive")
 
 	// Process incoming audio
 	for {
 		select {
 		case packet, ok := <-vc.OpusRecv:
 			if !ok {
-				log.Println("Voice receive channel closed")
+				logrus.Info("Voice receive channel closed")
 				return
 			}
 			
 			// Decode opus to PCM
 			pcm, err := decoder.Decode(packet.Opus, frameSize, false)
 			if err != nil {
-				log.Printf("Error decoding opus: %v", err)
+				logrus.WithError(err).Debug("Error decoding opus")
 				continue
 			}
 
@@ -127,7 +127,7 @@ func (p *Processor) transcribeAndClear(stream *Stream, sessionManager *session.M
 	// Transcribe audio
 	text, err := p.transcriber.Transcribe(audioData)
 	if err != nil {
-		log.Printf("Error transcribing audio: %v", err)
+		logrus.WithError(err).Error("Error transcribing audio")
 		return
 	}
 
@@ -135,9 +135,12 @@ func (p *Processor) transcribeAndClear(stream *Stream, sessionManager *session.M
 		// Add to session
 		err = sessionManager.AddTranscript(sessionID, stream.UserID, stream.Username, text)
 		if err != nil {
-			log.Printf("Error adding transcript: %v", err)
+			logrus.WithError(err).Error("Error adding transcript")
 		} else {
-			log.Printf("[%s]: %s", stream.Username, text)
+			logrus.WithFields(logrus.Fields{
+				"user":       stream.Username,
+				"transcript": text,
+			}).Info("Transcript added")
 		}
 	}
 }
