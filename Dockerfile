@@ -20,12 +20,12 @@ COPY . .
 RUN CGO_ENABLED=1 go build -ldflags '-w -s' \
     -o discord-voice-mcp ./cmd/discord-voice-mcp
 
-# Final stage - using alpine for ffmpeg support
+# Final stage
 FROM alpine:3.20
 
-# Install ffmpeg and opus runtime libraries
+# Install opus runtime library (required for dynamic linking)
 # hadolint ignore=DL3018
-RUN apk add --no-cache ffmpeg opus
+RUN apk add --no-cache opus
 
 WORKDIR /app
 
@@ -41,6 +41,6 @@ USER mcp
 # Run the binary
 CMD ["./discord-voice-mcp"]
 
-# Expected image size: ~50MB (vs 2.35GB for Node.js version!)
+# Expected image size: ~15-20MB
 # Binary size: ~15MB
-# Alpine + ffmpeg: ~35MB
+# Alpine + opus: ~5MB

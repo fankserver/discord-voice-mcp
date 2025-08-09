@@ -40,8 +40,8 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
       
-      # Build and push main Docker image with ffmpeg
-      - name: Build and push main Docker image
+      # Build and push standard Docker image
+      - name: Build and push standard Docker image
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -53,27 +53,7 @@ jobs:
             ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
           labels: |
             org.opencontainers.image.title=Discord Voice MCP
-            org.opencontainers.image.description=Discord voice transcription MCP server with ffmpeg support
-            org.opencontainers.image.version=${{ github.event.release.tag_name || github.event.inputs.tag }}
-            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
-            org.opencontainers.image.revision=${{ github.sha }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-      
-      # Build and push minimal image (amd64 only - static linking not available for arm64)
-      - name: Build and push minimal Docker image
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: Dockerfile.minimal
-          platforms: linux/amd64
-          push: true
-          tags: |
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.event.release.tag_name || github.event.inputs.tag }}-minimal
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:minimal
-          labels: |
-            org.opencontainers.image.title=Discord Voice MCP (Minimal)
-            org.opencontainers.image.description=Minimal Discord voice MCP without ffmpeg (12MB)
+            org.opencontainers.image.description=Discord voice transcription MCP server
             org.opencontainers.image.version=${{ github.event.release.tag_name || github.event.inputs.tag }}
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
             org.opencontainers.image.revision=${{ github.sha }}

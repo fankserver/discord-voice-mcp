@@ -25,15 +25,11 @@ jobs:
     strategy:
       matrix:
         include:
-          # Main Dockerfile with ffmpeg support
+          # Standard Dockerfile
           - dockerfile: Dockerfile
             suffix: ""
             platforms: linux/amd64,linux/arm64
-          # Minimal Dockerfile - amd64 only (static linking)
-          - dockerfile: Dockerfile.minimal
-            suffix: "-minimal"
-            platforms: linux/amd64
-          # Whisper Dockerfile with whisper.cpp
+          # Whisper Dockerfile with whisper.cpp for local transcription
           - dockerfile: Dockerfile.whisper
             suffix: "-whisper"
             platforms: linux/amd64,linux/arm64
@@ -129,13 +125,6 @@ jobs:
             --amend ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${TAG}-linux-arm64
           
           docker manifest push ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${TAG}-multiarch
-          
-          # Create manifest for minimal image
-          docker manifest create ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${TAG}-minimal-multiarch \
-            --amend ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${TAG}-minimal-linux-amd64 \
-            --amend ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${TAG}-minimal-linux-arm64
-          
-          docker manifest push ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${TAG}-minimal-multiarch
           
           # Create manifest for whisper image
           docker manifest create ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${TAG}-whisper-multiarch \
