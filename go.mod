@@ -3,7 +3,7 @@ module github.com/fankserver/discord-voice-mcp
 go 1.24
 
 require (
-	github.com/bwmarrin/discordgo v0.28.1
+	github.com/bwmarrin/discordgo v0.29.0
 	github.com/google/uuid v1.6.0
 	github.com/joho/godotenv v1.5.1
 	github.com/modelcontextprotocol/go-sdk v0.2.0
