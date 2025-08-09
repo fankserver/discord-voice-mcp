@@ -1,5 +1,10 @@
 # Build stage
-FROM golang:1.24-alpine3.20 AS builder
+FROM golang:1.24-alpine3.21 AS builder
+
+# Build arguments for target platform
+ARG TARGETPLATFORM
+ARG TARGETOS
+ARG TARGETARCH
 
 # Install build dependencies
 # hadolint ignore=DL3018
@@ -15,7 +20,7 @@ RUN go mod download
 COPY . .
 
 # Build static binary with CGO
-RUN CGO_ENABLED=1 GOOS=linux GOARCH=amd64 \
+RUN CGO_ENABLED=1 GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
     go build -a -tags netgo -ldflags '-w -s -extldflags "-static"' \
     -o discord-voice-mcp ./cmd/discord-voice-mcp
 
