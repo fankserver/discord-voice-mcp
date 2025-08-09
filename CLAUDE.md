@@ -9,9 +9,11 @@ Discord Voice MCP Server - A high-performance Discord voice transcription server
 ### Key Technologies
 - **Go 1.24** - Primary language with standard project layout
 - **MCP Go SDK** (v0.2.0) - Official Model Context Protocol SDK (experimental)
-- **discordgo** - Discord API wrapper
+- **discordgo** (v0.28.1) - Discord API wrapper
 - **gopus** - Opus audio codec (requires CGO)
-- **logrus** - Structured logging
+- **logrus** (v1.9.3) - Structured logging
+- **uuid** (v1.6.0) - UUID generation for sessions
+- **godotenv** (v1.5.1) - Environment variable loading
 
 ## Architecture
 
@@ -30,7 +32,8 @@ pkg/transcriber/         # Public transcriber interface (Whisper/Google/Mock)
 
 1. **MCP Server (`internal/mcp/server.go`)**
    - Uses official MCP Go SDK with typed tool handlers
-   - Tools: join_voice_channel, leave_voice_channel, get_transcript, list_sessions, export_session, get_bot_status
+   - Tools: join_my_voice_channel, follow_me, join_specific_channel, leave_voice_channel, get_transcript, list_sessions, export_session, get_bot_status
+   - User-centric tools for joining configured user's channel and auto-following
    - Returns structured `CallToolResultFor[T]` responses
 
 2. **Audio Pipeline (`internal/audio/processor.go`)**
@@ -40,9 +43,10 @@ pkg/transcriber/         # Public transcriber interface (Whisper/Google/Mock)
    - Constants: 48kHz sample rate, 2 channels, 960 frame size
 
 3. **Discord Bot (`internal/bot/bot.go`)**
-   - Manages Discord voice connections
-   - Handles voice state updates
-   - Commands: !join, !leave, !status
+   - Manages Discord voice connections and SSRC-to-user mapping
+   - Handles voice state updates and speaking events
+   - Auto-follow functionality for configured users
+   - User resolution through Discord guild member cache
 
 4. **Session Manager (`internal/session/manager.go`)**
    - Thread-safe transcript storage
@@ -53,35 +57,38 @@ pkg/transcriber/         # Public transcriber interface (Whisper/Google/Mock)
 
 ### Building & Running
 ```bash
-# Build optimized binary (12MB)
-make build
+# Build optimized binary
+go build -o discord-voice-mcp ./cmd/discord-voice-mcp
 
-# Run with MCP mode
-./discord-voice-mcp -mcp -token "YOUR_TOKEN"
+# Run (always MCP mode)
+./discord-voice-mcp -token "YOUR_TOKEN"
+
+# Run with specific transcriber
+./discord-voice-mcp -token "YOUR_TOKEN" -transcriber whisper -whisper-model "path/to/model"
 
 # Run tests
-make test
+go test ./...
 
 # Format code
-make fmt
+go fmt ./...
 
-# Lint (requires golangci-lint)
-make lint
+# Test specific package
+go test -v ./internal/audio
 ```
 
 ### Docker Operations
 ```bash
-# Build normal image (199MB with ffmpeg)
+# Build normal image (~50MB with ffmpeg)
 docker build -t discord-voice-mcp:latest .
 
-# Build minimal image (11MB, no ffmpeg)
+# Build minimal image (~12MB, no ffmpeg)
 docker build -f Dockerfile.minimal -t discord-voice-mcp:minimal .
 
-# Compare sizes
-make size-compare
+# Build Whisper-enabled image
+docker build -f Dockerfile.whisper -t discord-voice-mcp:whisper .
 
-# Cross-platform builds
-make build-all
+# Run with environment variables
+docker run -e DISCORD_TOKEN="YOUR_TOKEN" -e DISCORD_USER_ID="USER_ID" discord-voice-mcp:latest
 ```
 
 ### Testing Specific Components
@@ -136,20 +143,28 @@ Configurable via environment variables:
 ## Environment Variables
 ```bash
 DISCORD_TOKEN=             # Required: Bot token
-DISCORD_CHANNEL_ID=        # Optional: Auto-join channel
-DISCORD_GUILD_ID=          # Optional: Guild for auto-join
+DISCORD_USER_ID=           # Optional: User ID for "my channel" and follow features
+TRANSCRIBER_TYPE=          # Optional: mock, whisper, google (default: mock)
+WHISPER_MODEL_PATH=        # Required for whisper transcriber
 LOG_LEVEL=                 # debug, info, warn, error (default: info)
+
+# Audio processing configuration
+AUDIO_BUFFER_DURATION_SEC=2   # Buffer duration trigger (default: 2 seconds)
+AUDIO_SILENCE_TIMEOUT_MS=1500 # Silence detection timeout (default: 1500ms)
+AUDIO_MIN_BUFFER_MS=100       # Minimum audio before transcription (default: 100ms)
 ```
 
 ## Docker Build Optimization
-Both Dockerfiles use:
-- Multi-stage builds (builder not in final image)
-- Alpine Linux base for small size
-- Static binary compilation with CGO
-- hadolint ignore directives for unpinned packages (DL3018)
+Three Dockerfile variants:
+- **Dockerfile**: Alpine base with ffmpeg (~50MB)
+- **Dockerfile.minimal**: Scratch base, binary only (~12MB)
+- **Dockerfile.whisper**: Includes Whisper models and dependencies
 
-Normal image includes ffmpeg for audio processing.
-Minimal image uses scratch base with only binary and CA certificates.
+All use:
+- Multi-stage builds (builder not in final image)
+- Static binary compilation with CGO
+- Non-root user for security
+- hadolint ignore directives for unpinned packages (DL3018)
 
 ## GitHub Actions Workflows
 - **CI**: Tests on Go 1.23/1.24, linting, security scanning
@@ -163,12 +178,13 @@ Images published to:
 ## Known Issues & Limitations
 - MCP SDK is experimental - expect breaking changes
 - Opus library shows compilation warnings (harmless, from upstream)
-- Transcriber implementations (Whisper/Google) not yet complete
-- Audio currently uses mock transcription
+- Google transcriber is stub implementation (returns "not implemented")
+- Whisper transcriber fully implemented but requires whisper.cpp binary
+- Default uses mock transcription for development
 
 ## Performance Characteristics
-- Binary size: 12MB (static with all dependencies)
+- Binary size: ~15MB (static with all dependencies)
 - Memory usage: ~10MB idle
 - Startup time: <100ms
-- Docker minimal: 12.4MB
-- Docker with ffmpeg: 201MB
+- Docker minimal: ~12MB
+- Docker with ffmpeg: ~50MB (99.5% reduction from Node.js version)

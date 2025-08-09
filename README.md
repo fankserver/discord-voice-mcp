@@ -6,8 +6,8 @@ A pure MCP (Model Context Protocol) server for Discord voice channel transcripti
 
 | Component | Details |
 |-----------|---------|
-| Docker Image | **11 MB** (Alpine-based) |
-| Binary Size | ~12 MB |
+| Docker Image | **~12 MB** (minimal) / **~50 MB** (with ffmpeg) |
+| Binary Size | ~15 MB |
 | Memory Usage | ~10-20 MB |
 | Language | Go 1.24 |
 | MCP SDK | v0.2.0 (official Go SDK) |
@@ -54,11 +54,10 @@ docker run -i --rm \
   -e DISCORD_USER_ID="your-discord-user-id" \
   ghcr.io/fankserver/discord-voice-mcp:latest
 
-# Or with auto-follow enabled by default
+# Basic usage
 docker run -i --rm \
   -e DISCORD_TOKEN="your-bot-token" \
   -e DISCORD_USER_ID="your-discord-user-id" \
-  -e AUTO_FOLLOW="true" \
   ghcr.io/fankserver/discord-voice-mcp:latest
 ```
 
@@ -110,10 +109,12 @@ internal/
 │   └── bot.go           - Discord voice connection handler
 ├── audio/
 │   └── processor.go     - Audio capture & processing
-├── session/
-│   └── manager.go       - Transcript session management
+└── session/
+    └── manager.go       - Transcript session management
+
+pkg/
 └── transcriber/
-    └── interface.go     - Transcription provider interface
+    └── transcriber.go   - Transcription provider interface
 ```
 
 ### Key Design Principles
@@ -126,7 +127,7 @@ internal/
 
 ## 🔧 Technical Features
 
-- **Lightweight**: 11MB Docker image using Alpine Linux
+- **Lightweight**: 12MB minimal Docker image, 50MB with ffmpeg
 - **Fast Startup**: Sub-second initialization
 - **Cross-Platform**: Compile for Windows, macOS, Linux, ARM
 - **Concurrent**: Go's goroutines handle multiple audio streams efficiently
@@ -136,8 +137,8 @@ internal/
 ## 🛠️ Development
 
 ### Prerequisites
-- Go 1.22+ 
-- FFmpeg (for audio processing)
+- Go 1.24+ 
+- FFmpeg (for audio processing with normal Docker image)
 - Discord Bot Token
 - (Optional) Whisper.cpp and model file for real transcription
 
@@ -167,6 +168,9 @@ ls -lh discord-voice-mcp
 | `LOG_LEVEL` | ❌ | Logging verbosity (default: `info`) | `debug`, `info`, `warn`, `error` |
 | `TRANSCRIBER_TYPE` | ❌ | Transcription provider (default: `mock`) | `mock`, `whisper`, `google` |
 | `WHISPER_MODEL_PATH` | ⚠️ | Path to Whisper model (required if using `whisper`) | `/models/ggml-base.en.bin` |
+| `AUDIO_BUFFER_DURATION_SEC` | ❌ | Buffer duration trigger (default: `2`) | `1`, `2`, `5` |
+| `AUDIO_SILENCE_TIMEOUT_MS` | ❌ | Silence detection timeout (default: `1500`) | `500`, `1500`, `3000` |
+| `AUDIO_MIN_BUFFER_MS` | ❌ | Minimum audio before transcription (default: `100`) | `50`, `100`, `200` |
 
 
 
@@ -242,7 +246,7 @@ For real offline transcription using Whisper:
    ```
 
 ### Google Speech-to-Text (Cloud)
-The Google Speech-to-Text transcriber is implemented but requires Google Cloud credentials configuration (not yet fully integrated).
+The Google Speech-to-Text transcriber is a stub implementation that returns "Google transcription not implemented in PoC". Full implementation requires Google Cloud credentials integration.
 
 ## ⚙️ Audio Processing Configuration
 
@@ -336,8 +340,8 @@ docker run -i --rm \
 
 ### Technical Benefits
 - **Resource Efficiency** - Runs on Raspberry Pi or small VPS
-- **Fast Deployment** - 11MB images deploy instantly
-- **Cost Savings** - 95% less memory usage
+- **Fast Deployment** - 12-50MB images deploy instantly
+- **Cost Savings** - 99.5% size reduction vs Node.js (2.35GB → 50MB)
 - **Cross-Platform** - Single binary for any OS
 - **Claude Integration** - Native MCP support
 
@@ -347,22 +351,23 @@ docker run -i --rm \
 - ✅ **Pure MCP Control** - No Discord text commands needed
 - ✅ **User-Centric Tools** - "Join my channel" functionality  
 - ✅ **Auto-Follow Mode** - Bot follows you automatically
-- ✅ **Minimal Docker Images** - Only 11MB
+- ✅ **Minimal Docker Images** - 12MB minimal, 50MB with ffmpeg
 - ✅ **Voice Connection** - Stable Discord voice handling
 - ✅ **Session Management** - Organized transcript storage
 - ✅ **Audio Pipeline** - Real-time PCM processing
 - ✅ **MCP SDK Integration** - Using official Go SDK v0.2.0
 
 ### In Progress
-- ✅ **Transcription** - Whisper integration complete, Google Speech ready
+- ✅ **Whisper Transcription** - Complete implementation with whisper.cpp
+- 🚧 **Google Speech Integration** - Currently stub implementation
 - 🚧 **Real-time Updates** - Live transcript streaming
 - 🚧 **Multi-user Support** - Track multiple speakers
 
 ## 🔮 Roadmap
 
 ### Phase 1: Transcription (Current)
-- [ ] Integrate whisper.cpp for offline transcription
-- [ ] Add Google Cloud Speech-to-Text
+- [x] Integrate whisper.cpp for offline transcription (completed)
+- [ ] Add Google Cloud Speech-to-Text (stub exists)
 - [ ] Implement real-time streaming transcripts
 
 ### Phase 2: Enhanced Features
