@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Discord Voice MCP Server - A high-performance Discord voice transcription server with MCP (Model Context Protocol) integration, written in Go. This is a complete rewrite from Node.js achieving 99.5% Docker image size reduction (11MB vs 2.35GB).
+Discord Voice MCP Server - A high-performance Discord voice transcription server with MCP (Model Context Protocol) integration, written in Go.
 
 ### Key Technologies
 - **Go 1.24** - Primary language with standard project layout
@@ -187,4 +187,4 @@ Images published to:
 - Memory usage: ~10MB idle
 - Startup time: <100ms
 - Docker minimal: ~12MB
-- Docker with ffmpeg: ~50MB (99.5% reduction from Node.js version)
+- Docker with ffmpeg: ~50MB

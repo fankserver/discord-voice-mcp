@@ -341,7 +341,7 @@ docker run -i --rm \
 ### Technical Benefits
 - **Resource Efficiency** - Runs on Raspberry Pi or small VPS
 - **Fast Deployment** - 12-50MB images deploy instantly
-- **Cost Savings** - 99.5% size reduction vs Node.js (2.35GB → 50MB)
+- **Cost Efficiency** - Small container footprint (12-50MB images)
 - **Cross-Platform** - Single binary for any OS
 - **Claude Integration** - Native MCP support
 
