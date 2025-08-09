@@ -74,7 +74,7 @@ func TestBotStatus(t *testing.T) {
 
 	// Get initial status
 	status := bot.GetStatus()
-	
+
 	// Check status fields
 	if _, ok := status["connected"].(bool); !ok {
 		t.Error("Expected connected to be a boolean")
@@ -82,7 +82,7 @@ func TestBotStatus(t *testing.T) {
 	if inVoice, ok := status["inVoice"].(bool); !ok || inVoice {
 		t.Error("Expected inVoice to be false initially")
 	}
-	
+
 	// Should not have guild/channel IDs when not in voice
 	if _, hasGuildID := status["guildID"]; hasGuildID {
 		t.Error("Should not have guildID when not in voice")
@@ -97,7 +97,7 @@ func TestGetUserBySSRC(t *testing.T) {
 	sessionManager := session.NewManager()
 	trans := &transcriber.MockTranscriber{}
 	audioProcessor := audio.NewProcessor(trans)
-	
+
 	bot, err := New("test-token", sessionManager, audioProcessor)
 	assert.NoError(t, err)
 	assert.NotNil(t, bot)
@@ -135,7 +135,7 @@ func TestSSRCMappingConcurrency(t *testing.T) {
 	sessionManager := session.NewManager()
 	trans := &transcriber.MockTranscriber{}
 	audioProcessor := audio.NewProcessor(trans)
-	
+
 	bot, err := New("test-token", sessionManager, audioProcessor)
 	assert.NoError(t, err)
 
@@ -148,7 +148,7 @@ func TestSSRCMappingConcurrency(t *testing.T) {
 		go func(id int) {
 			defer wg.Done()
 			ssrc := uint32(1000 + id)
-			
+
 			// Simulate adding user mapping (normally done in voiceSpeakingUpdate)
 			bot.mu.Lock()
 			bot.ssrcToUser[ssrc] = &UserInfo{
@@ -166,7 +166,7 @@ func TestSSRCMappingConcurrency(t *testing.T) {
 		go func(id int) {
 			defer wg.Done()
 			ssrc := uint32(1000 + id)
-			
+
 			// Read user info
 			userID, _, _ := bot.GetUserBySSRC(ssrc)
 			// May get fallback or actual value depending on timing
@@ -187,7 +187,7 @@ func TestLeaveChannelClearsSSRCMappings(t *testing.T) {
 	sessionManager := session.NewManager()
 	trans := &transcriber.MockTranscriber{}
 	audioProcessor := audio.NewProcessor(trans)
-	
+
 	bot, err := New("test-token", sessionManager, audioProcessor)
 	assert.NoError(t, err)
 
@@ -217,23 +217,23 @@ func TestFindUserVoiceChannel(t *testing.T) {
 	sessionManager := session.NewManager()
 	trans := &transcriber.MockTranscriber{}
 	audioProcessor := audio.NewProcessor(trans)
-	
+
 	bot, err := New("test-token", sessionManager, audioProcessor)
 	assert.NoError(t, err)
-	
+
 	// Initialize bot's Discord state
 	bot.discord.State.Guilds = []*discordgo.Guild{
 		{ID: "guild1"},
 		{ID: "guild2"},
 	}
-	
+
 	// Test 1: User not in any voice channel
 	guildID, channelID, err := bot.FindUserVoiceChannel("user-not-in-voice")
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "not in any voice channel")
 	assert.Empty(t, guildID)
 	assert.Empty(t, channelID)
-	
+
 	// Test 2: Add user to voice channel in guild1
 	bot.discord.State.Guilds[0].VoiceStates = []*discordgo.VoiceState{
 		{
@@ -241,12 +241,12 @@ func TestFindUserVoiceChannel(t *testing.T) {
 			ChannelID: "voice-channel-1",
 		},
 	}
-	
+
 	guildID, channelID, err = bot.FindUserVoiceChannel("user-in-voice")
 	assert.NoError(t, err)
 	assert.Equal(t, "guild1", guildID)
 	assert.Equal(t, "voice-channel-1", channelID)
-	
+
 	// Test 3: User in guild2
 	bot.discord.State.Guilds[1].VoiceStates = []*discordgo.VoiceState{
 		{
@@ -254,18 +254,18 @@ func TestFindUserVoiceChannel(t *testing.T) {
 			ChannelID: "voice-channel-2",
 		},
 	}
-	
+
 	guildID, channelID, err = bot.FindUserVoiceChannel("user-in-guild2")
 	assert.NoError(t, err)
 	assert.Equal(t, "guild2", guildID)
 	assert.Equal(t, "voice-channel-2", channelID)
-	
+
 	// Test 4: User with empty channel ID (not actually in voice)
 	bot.discord.State.Guilds[0].VoiceStates = append(bot.discord.State.Guilds[0].VoiceStates, &discordgo.VoiceState{
 		UserID:    "user-no-channel",
 		ChannelID: "", // Empty channel ID means not in voice
 	})
-	
+
 	_, _, err = bot.FindUserVoiceChannel("user-no-channel")
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "not in any voice channel")
@@ -278,10 +278,10 @@ func TestJoinUserChannel(t *testing.T) {
 	sessionManager := session.NewManager()
 	trans := &transcriber.MockTranscriber{}
 	audioProcessor := audio.NewProcessor(trans)
-	
+
 	bot, err := New("test-token", sessionManager, audioProcessor)
 	assert.NoError(t, err)
-	
+
 	// Initialize bot's Discord state
 	bot.discord.State.Guilds = []*discordgo.Guild{
 		{
@@ -294,18 +294,18 @@ func TestJoinUserChannel(t *testing.T) {
 			},
 		},
 	}
-	
+
 	// Test 1: User not in any channel
 	err = bot.JoinUserChannel("non-existent-user")
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "not in any voice channel")
-	
+
 	// Test 2: Test FindUserVoiceChannel directly for a user in voice
 	guildID, channelID, err := bot.FindUserVoiceChannel("target-user")
 	assert.NoError(t, err)
 	assert.Equal(t, "guild1", guildID)
 	assert.Equal(t, "target-channel", channelID)
-	
+
 	// Note: We can't test the actual join without a valid Discord connection
 	// as it would require mocking the Discord API
 }

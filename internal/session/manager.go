@@ -20,12 +20,12 @@ type Manager struct {
 
 // Session represents a transcription session
 type Session struct {
-	ID          string       `json:"id"`
-	GuildID     string       `json:"guildId"`
-	ChannelID   string       `json:"channelId"`
-	StartTime   time.Time    `json:"startTime"`
-	EndTime     *time.Time   `json:"endTime,omitempty"`
-	Transcripts []Transcript `json:"transcripts"`
+	ID                    string                 `json:"id"`
+	GuildID               string                 `json:"guildId"`
+	ChannelID             string                 `json:"channelId"`
+	StartTime             time.Time              `json:"startTime"`
+	EndTime               *time.Time             `json:"endTime,omitempty"`
+	Transcripts           []Transcript           `json:"transcripts"`
 	PendingTranscriptions []PendingTranscription `json:"pendingTranscriptions,omitempty"`
 }
 
@@ -58,22 +58,22 @@ func (m *Manager) CreateSession(guildID, channelID string) string {
 	defer m.mu.Unlock()
 
 	session := &Session{
-		ID:          uuid.New().String(),
-		GuildID:     guildID,
-		ChannelID:   channelID,
-		StartTime:   time.Now(),
-		Transcripts: []Transcript{},
+		ID:                    uuid.New().String(),
+		GuildID:               guildID,
+		ChannelID:             channelID,
+		StartTime:             time.Now(),
+		Transcripts:           []Transcript{},
 		PendingTranscriptions: []PendingTranscription{},
 	}
 
 	m.sessions[session.ID] = session
-	
+
 	logrus.WithFields(logrus.Fields{
 		"session_id": session.ID,
 		"guild_id":   guildID,
 		"channel_id": channelID,
 	}).Debug("Session created")
-	
+
 	return session.ID
 }
 
@@ -96,14 +96,14 @@ func (m *Manager) AddPendingTranscription(sessionID, userID, username string, du
 	}
 
 	session.PendingTranscriptions = append(session.PendingTranscriptions, pending)
-	
+
 	logrus.WithFields(logrus.Fields{
 		"session_id": sessionID,
 		"user_id":    userID,
 		"username":   username,
 		"duration":   duration,
 	}).Debug("Pending transcription added")
-	
+
 	return nil
 }
 
@@ -125,7 +125,7 @@ func (m *Manager) RemovePendingTranscription(sessionID, userID string) error {
 		}
 	}
 	session.PendingTranscriptions = filtered
-	
+
 	return nil
 }
 
@@ -148,7 +148,7 @@ func (m *Manager) AddTranscript(sessionID, userID, username, text string) error 
 	}
 
 	session.Transcripts = append(session.Transcripts, transcript)
-	
+
 	// Remove any pending transcription for this user
 	filtered := make([]PendingTranscription, 0, len(session.PendingTranscriptions))
 	for _, pending := range session.PendingTranscriptions {
@@ -157,15 +157,15 @@ func (m *Manager) AddTranscript(sessionID, userID, username, text string) error 
 		}
 	}
 	session.PendingTranscriptions = filtered
-	
+
 	logrus.WithFields(logrus.Fields{
-		"session_id":       sessionID,
-		"user_id":          userID,
-		"username":         username,
-		"text_length":      len(text),
+		"session_id":        sessionID,
+		"user_id":           userID,
+		"username":          username,
+		"text_length":       len(text),
 		"total_transcripts": len(session.Transcripts),
 	}).Debug("Transcript added to session")
-	
+
 	return nil
 }
 

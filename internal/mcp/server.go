@@ -176,7 +176,6 @@ type JoinChannelInput struct {
 	ChannelID string `json:"channelId"`
 }
 
-
 func (s *Server) handleJoinVoiceChannel(ctx context.Context, session *mcp.ServerSession, params *mcp.CallToolParamsFor[JoinChannelInput]) (*mcp.CallToolResultFor[struct{}], error) {
 	logrus.WithFields(logrus.Fields{
 		"guild_id":   params.Arguments.GuildID,
@@ -226,26 +225,26 @@ func (s *Server) handleGetTranscript(ctx context.Context, sess *mcp.ServerSessio
 	}
 
 	// Format session data as text
-	transcript := fmt.Sprintf("Session %s\nStarted: %s\n", 
+	transcript := fmt.Sprintf("Session %s\nStarted: %s\n",
 		sessionData.ID, sessionData.StartTime.Format("2006-01-02 15:04:05"))
-	
+
 	// Show pending transcriptions if any
 	if len(sessionData.PendingTranscriptions) > 0 {
 		transcript += "\nPending Transcriptions (processing):\n"
 		for _, p := range sessionData.PendingTranscriptions {
 			elapsed := time.Since(p.StartTime).Seconds()
-			transcript += fmt.Sprintf("  ⏳ %s: Processing %.1fs of audio (elapsed: %.1fs)\n", 
+			transcript += fmt.Sprintf("  ⏳ %s: Processing %.1fs of audio (elapsed: %.1fs)\n",
 				p.Username, p.Duration, elapsed)
 		}
 	}
-	
+
 	// Show completed transcripts
 	transcript += "\nTranscripts:\n"
 	for _, t := range sessionData.Transcripts {
-		transcript += fmt.Sprintf("[%s] %s: %s\n", 
+		transcript += fmt.Sprintf("[%s] %s: %s\n",
 			t.Timestamp.Format("15:04:05"), t.Username, t.Text)
 	}
-	
+
 	return &mcp.CallToolResultFor[struct{}]{
 		Content: []mcp.Content{
 			&mcp.TextContent{Text: transcript},
@@ -309,28 +308,28 @@ func (s *Server) handleGetBotStatus(ctx context.Context, sess *mcp.ServerSession
 	followUser, autoFollow := s.bot.GetFollowStatus()
 
 	statusText := "Bot Status:\n"
-	
+
 	// Safely get connected status
 	if connected, ok := status["connected"].(bool); ok {
 		statusText += fmt.Sprintf("  Connected: %v\n", connected)
 	} else {
 		statusText += "  Connected: unknown\n"
 	}
-	
+
 	// Safely get inVoice status
 	if inVoice, ok := status["inVoice"].(bool); ok {
 		statusText += fmt.Sprintf("  In Voice: %v\n", inVoice)
 	} else {
 		statusText += "  In Voice: unknown\n"
 	}
-	
+
 	if guildID, ok := status["guildID"].(string); ok {
 		statusText += fmt.Sprintf("  Guild ID: %s\n", guildID)
 	}
 	if channelID, ok := status["channelID"].(string); ok {
 		statusText += fmt.Sprintf("  Channel ID: %s\n", channelID)
 	}
-	
+
 	if followUser != "" {
 		statusText += fmt.Sprintf("  Following User: %s\n", followUser)
 	}

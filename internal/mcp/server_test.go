@@ -5,9 +5,9 @@ import (
 	"os"
 	"testing"
 
+	"github.com/fankserver/discord-voice-mcp/internal/audio"
 	"github.com/fankserver/discord-voice-mcp/internal/bot"
 	"github.com/fankserver/discord-voice-mcp/internal/session"
-	"github.com/fankserver/discord-voice-mcp/internal/audio"
 	"github.com/fankserver/discord-voice-mcp/pkg/transcriber"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/stretchr/testify/assert"
@@ -19,7 +19,7 @@ func TestNewServer(t *testing.T) {
 	sessionManager := session.NewManager()
 	trans := &transcriber.MockTranscriber{}
 	audioProcessor := audio.NewProcessor(trans)
-	
+
 	// Create bot (will fail to connect without valid token, but that's ok for this test)
 	voiceBot, err := bot.New("dummy_token", sessionManager, audioProcessor)
 	if err != nil {
@@ -87,7 +87,7 @@ func TestHandleGetTranscriptNonExistentSession(t *testing.T) {
 	}
 
 	result, err := server.handleGetTranscript(ctx, sess, params)
-	
+
 	// Should return an error for non-existent session
 	assert.Error(t, err)
 	assert.Nil(t, result)
@@ -112,12 +112,12 @@ func TestHandleExportSessionNonExistent(t *testing.T) {
 	}
 
 	result, err := server.handleExportSession(ctx, sess, params)
-	
+
 	// Should return an error for non-existent session
 	assert.Error(t, err)
 	assert.Nil(t, result)
 	assert.Contains(t, err.Error(), "failed to export session")
-	
+
 	// Clean up any exports directory that might have been created
 	_ = os.RemoveAll("exports")
 }
@@ -138,7 +138,7 @@ func TestHandleJoinMyVoiceChannelNoUserConfigured(t *testing.T) {
 	}
 
 	result, err := server.handleJoinMyVoiceChannel(ctx, sess, params)
-	
+
 	// Should return a message about no user configured
 	assert.NoError(t, err)
 	assert.NotNil(t, result)
@@ -166,7 +166,7 @@ func TestHandleFollowMeNoUserConfigured(t *testing.T) {
 	}
 
 	result, err := server.handleFollowMe(ctx, sess, params)
-	
+
 	// Should return a message about no user configured
 	assert.NoError(t, err)
 	assert.NotNil(t, result)
@@ -192,7 +192,7 @@ func TestHandleListSessionsEmpty(t *testing.T) {
 	}
 
 	result, err := server.handleListSessions(ctx, sess, params)
-	
+
 	// Should succeed with "No sessions found" message
 	assert.NoError(t, err)
 	assert.NotNil(t, result)
@@ -213,7 +213,7 @@ func TestHandleListSessionsWithData(t *testing.T) {
 	// Create some sessions
 	session1 := sessionManager.CreateSession("guild1", "channel1")
 	session2 := sessionManager.CreateSession("guild2", "channel2")
-	
+
 	// Add data to sessions
 	_ = sessionManager.AddTranscript(session1, "user1", "User1", "Message 1")
 	_ = sessionManager.AddPendingTranscription(session2, "user2", "User2", 5.0)
@@ -226,7 +226,7 @@ func TestHandleListSessionsWithData(t *testing.T) {
 	}
 
 	result, err := server.handleListSessions(ctx, sess, params)
-	
+
 	// Should succeed and show both sessions
 	assert.NoError(t, err)
 	assert.NotNil(t, result)
@@ -258,7 +258,7 @@ func TestHandleGetBotStatus(t *testing.T) {
 	}
 
 	result, err := server.handleGetBotStatus(ctx, sess, params)
-	
+
 	// Should succeed
 	assert.NoError(t, err)
 	assert.NotNil(t, result)
@@ -295,7 +295,7 @@ func TestHandleGetTranscriptWithPendingTranscriptions(t *testing.T) {
 	}
 
 	result, err := server.handleGetTranscript(ctx, sess, params)
-	
+
 	// Should succeed and show both completed and pending
 	assert.NoError(t, err)
 	assert.NotNil(t, result)

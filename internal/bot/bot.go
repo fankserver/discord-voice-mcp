@@ -23,8 +23,8 @@ type VoiceBot struct {
 	sessions       *session.Manager
 	audioProcessor *audio.Processor
 	voiceConn      *discordgo.VoiceConnection
-	followUserID   string // User ID to follow
-	autoFollow     bool   // Whether to auto-follow user
+	followUserID   string               // User ID to follow
+	autoFollow     bool                 // Whether to auto-follow user
 	ssrcToUser     map[uint32]*UserInfo // Maps SSRC to user information
 	mu             sync.Mutex
 }
@@ -83,12 +83,12 @@ func (vb *VoiceBot) JoinChannel(guildID, channelID string) error {
 	if err != nil {
 		return fmt.Errorf("error joining voice channel: %w", err)
 	}
-	
+
 	// Enable voice receive
 	if err := vc.Speaking(false); err != nil {
 		logrus.WithError(err).Debug("Error setting speaking state")
 	}
-	
+
 	logrus.WithFields(logrus.Fields{
 		"guild_id":   guildID,
 		"channel_id": channelID,
@@ -123,7 +123,7 @@ func (vb *VoiceBot) LeaveChannel() {
 		vb.voiceConn = nil
 		logrus.Info("Left voice channel")
 	}
-	
+
 	// Always clear SSRC mappings when leaving channel
 	for k := range vb.ssrcToUser {
 		delete(vb.ssrcToUser, k)
@@ -153,13 +153,13 @@ func (vb *VoiceBot) JoinUserChannel(userID string) error {
 	if err != nil {
 		return err
 	}
-	
+
 	logrus.WithFields(logrus.Fields{
 		"user_id":    userID,
 		"guild_id":   guildID,
 		"channel_id": channelID,
 	}).Info("Joining user's voice channel")
-	
+
 	return vb.JoinChannel(guildID, channelID)
 }
 
@@ -167,10 +167,10 @@ func (vb *VoiceBot) JoinUserChannel(userID string) error {
 func (vb *VoiceBot) SetFollowUser(userID string, autoFollow bool) {
 	vb.mu.Lock()
 	defer vb.mu.Unlock()
-	
+
 	vb.followUserID = userID
 	vb.autoFollow = autoFollow
-	
+
 	logrus.WithFields(logrus.Fields{
 		"user_id":     userID,
 		"auto_follow": autoFollow,
@@ -191,7 +191,7 @@ func (vb *VoiceBot) GetStatus() map[string]interface{} {
 
 	// Check if state exists and has a session ID (indicates ready)
 	connected := vb.discord.State != nil && vb.discord.State.SessionID != ""
-	
+
 	status := map[string]interface{}{
 		"connected": connected,
 		"inVoice":   vb.voiceConn != nil,
@@ -239,12 +239,12 @@ func (vb *VoiceBot) voiceStateUpdate(s *discordgo.Session, vsu *discordgo.VoiceS
 				"guild_id":   vsu.GuildID,
 				"channel_id": vsu.ChannelID,
 			}).Info("Followed user changed voice channel, following")
-			
+
 			// Only join if we're not already in that channel
 			vb.mu.Lock()
 			currentConn := vb.voiceConn
 			vb.mu.Unlock()
-			
+
 			if currentConn == nil || currentConn.ChannelID != vsu.ChannelID {
 				if err := vb.JoinChannel(vsu.GuildID, vsu.ChannelID); err != nil {
 					logrus.WithError(err).Error("Failed to follow user to new channel")
@@ -259,7 +259,7 @@ func (vb *VoiceBot) voiceSpeakingUpdate(s *discordgo.Session, vsu *discordgo.Voi
 	if vsu.Speaking {
 		vb.mu.Lock()
 		defer vb.mu.Unlock()
-		
+
 		// Get user information
 		user, err := s.User(vsu.UserID)
 		if err != nil {
@@ -276,7 +276,7 @@ func (vb *VoiceBot) voiceSpeakingUpdate(s *discordgo.Session, vsu *discordgo.Voi
 			}
 			return
 		}
-		
+
 		// Get nickname if in a guild
 		nickname := user.Username
 		if vb.voiceConn != nil && vb.voiceConn.GuildID != "" {
@@ -285,7 +285,7 @@ func (vb *VoiceBot) voiceSpeakingUpdate(s *discordgo.Session, vsu *discordgo.Voi
 				nickname = member.Nick
 			}
 		}
-		
+
 		// Check for overflow before conversion
 		if vsu.SSRC < 0 || vsu.SSRC > int(^uint32(0)) {
 			logrus.WithField("ssrc", vsu.SSRC).Error("SSRC value out of uint32 range")
@@ -296,7 +296,7 @@ func (vb *VoiceBot) voiceSpeakingUpdate(s *discordgo.Session, vsu *discordgo.Voi
 			Username: user.Username,
 			Nickname: nickname,
 		}
-		
+
 		logrus.WithFields(logrus.Fields{
 			"ssrc":     vsu.SSRC,
 			"user_id":  vsu.UserID,
@@ -310,11 +310,11 @@ func (vb *VoiceBot) voiceSpeakingUpdate(s *discordgo.Session, vsu *discordgo.Voi
 func (vb *VoiceBot) GetUserBySSRC(ssrc uint32) (userID, username, nickname string) {
 	vb.mu.Lock()
 	defer vb.mu.Unlock()
-	
+
 	if info, exists := vb.ssrcToUser[ssrc]; exists {
 		return info.UserID, info.Username, info.Nickname
 	}
-	
+
 	// Return SSRC as fallback if not found
 	ssrcStr := fmt.Sprintf("%d", ssrc)
 	return ssrcStr, ssrcStr, ssrcStr

@@ -32,10 +32,10 @@ func (m *MockTranscriber) Close() error {
 
 func TestProcessorBufferThreshold(t *testing.T) {
 	tests := []struct {
-		name           string
-		bufferSize     int
-		shouldTrigger  bool
-		description    string
+		name          string
+		bufferSize    int
+		shouldTrigger bool
+		description   string
 	}{
 		{
 			name:          "buffer_exactly_at_threshold",
@@ -95,7 +95,7 @@ func TestProcessorBufferThreshold(t *testing.T) {
 			if stream.Buffer.Len() >= transcriptionBufferSize {
 				// This simulates what happens in ProcessVoiceReceive
 				go processor.transcribeAndClear(stream, sessionManager, sessionID)
-				
+
 				// Give goroutine time to execute
 				time.Sleep(100 * time.Millisecond)
 			}
@@ -134,31 +134,31 @@ func TestProcessorBufferGrowthAndReset(t *testing.T) {
 	channels := 2
 	bytesPerSample := 2
 	packetSize := frameSize * channels * bytesPerSample // 3840 bytes per packet
-	
+
 	packetsNeeded := (transcriptionBufferSize / packetSize) // 100 packets to reach threshold
-	
+
 	// Add packets just below threshold
 	for i := 0; i < packetsNeeded-1; i++ {
 		data := make([]byte, packetSize)
 		stream.Buffer.Write(data)
 	}
-	
-	assert.Equal(t, packetSize*(packetsNeeded-1), stream.Buffer.Len(), 
+
+	assert.Equal(t, packetSize*(packetsNeeded-1), stream.Buffer.Len(),
 		"Buffer should be just below threshold")
-	
+
 	// Add one more packet to reach threshold
 	data := make([]byte, packetSize)
 	stream.Buffer.Write(data)
-	
-	assert.Equal(t, transcriptionBufferSize, stream.Buffer.Len(), 
+
+	assert.Equal(t, transcriptionBufferSize, stream.Buffer.Len(),
 		"Buffer should be exactly at threshold")
-	
+
 	// Setup mock for transcription
 	mockTranscriber.On("Transcribe", mock.Anything).Return("test transcription", nil).Once()
-	
+
 	// Trigger transcription
 	processor.transcribeAndClear(stream, sessionManager, sessionID)
-	
+
 	// Verify buffer was cleared
 	assert.Equal(t, 0, stream.Buffer.Len(), "Buffer should be empty after transcription")
 	mockTranscriber.AssertExpectations(t)
@@ -168,25 +168,25 @@ func TestProcessorConcurrentAccess(t *testing.T) {
 	// Test that concurrent access to streams is thread-safe
 	mockTranscriber := new(MockTranscriber)
 	processor := NewProcessor(mockTranscriber)
-	
+
 	// Setup mock to handle multiple transcriptions
 	mockTranscriber.On("Transcribe", mock.Anything).Return("test", nil).Maybe()
 	mockTranscriber.On("Close").Return(nil).Maybe()
-	
+
 	var wg sync.WaitGroup
 	numGoroutines := 10
-	
+
 	// Simulate multiple concurrent voice streams
 	for i := 0; i < numGoroutines; i++ {
 		wg.Add(1)
 		go func(id int) {
 			defer wg.Done()
-			
+
 			// Create/get stream
 			ssrc := uint32(id)
 			userID := fmt.Sprintf("user-%d", id)
 			stream := processor.getOrCreateStream(ssrc, userID, userID, userID, nil, "")
-			
+
 			// Add data to buffer
 			data := make([]byte, 1000)
 			stream.mu.Lock()
@@ -194,9 +194,9 @@ func TestProcessorConcurrentAccess(t *testing.T) {
 			stream.mu.Unlock()
 		}(i)
 	}
-	
+
 	wg.Wait()
-	
+
 	// Verify all streams were created
 	assert.Equal(t, numGoroutines, len(processor.activeStreams))
 }
@@ -204,23 +204,23 @@ func TestProcessorConcurrentAccess(t *testing.T) {
 func TestGetOrCreateStream(t *testing.T) {
 	mockTranscriber := new(MockTranscriber)
 	processor := NewProcessor(mockTranscriber)
-	
+
 	// First call should create a new stream
 	ssrc := uint32(12345)
 	userID := "user-123"
 	username := "TestUser"
 	nickname := "TestNick"
 	stream1 := processor.getOrCreateStream(ssrc, userID, username, nickname, nil, "")
-	
+
 	assert.NotNil(t, stream1)
 	assert.Equal(t, userID, stream1.UserID)
 	assert.Equal(t, nickname, stream1.Username) // Username field stores nickname
 	assert.NotNil(t, stream1.Buffer)
-	
+
 	// Second call with same SSRC should return the same stream
 	stream2 := processor.getOrCreateStream(ssrc, userID, username, nickname, nil, "")
 	assert.Equal(t, stream1, stream2, "Should return the same stream instance")
-	
+
 	// Different SSRC should create a new stream
 	differentSSRC := uint32(67890)
 	stream3 := processor.getOrCreateStream(differentSSRC, "different-user", "DifferentUser", "DiffNick", nil, "")
@@ -232,17 +232,17 @@ func TestTranscribeAndClearEmptyBuffer(t *testing.T) {
 	processor := NewProcessor(mockTranscriber)
 	sessionManager := session.NewManager()
 	sessionID := sessionManager.CreateSession("test-guild", "test-channel")
-	
+
 	// Create stream with empty buffer
 	stream := &Stream{
 		UserID:   "test-user",
 		Username: "TestUser",
 		Buffer:   new(bytes.Buffer),
 	}
-	
+
 	// Should not call transcriber for empty buffer
 	processor.transcribeAndClear(stream, sessionManager, sessionID)
-	
+
 	mockTranscriber.AssertNotCalled(t, "Transcribe")
 }
 
@@ -251,23 +251,23 @@ func TestTranscribeAndClearAddsToSession(t *testing.T) {
 	processor := NewProcessor(mockTranscriber)
 	sessionManager := session.NewManager()
 	sessionID := sessionManager.CreateSession("test-guild", "test-channel")
-	
+
 	// Create stream with data
 	stream := &Stream{
 		UserID:   "test-user",
 		Username: "TestUser",
 		Buffer:   bytes.NewBuffer(make([]byte, 1000)),
 	}
-	
+
 	expectedText := "Hello, this is a test transcription"
 	mockTranscriber.On("Transcribe", mock.Anything).Return(expectedText, nil).Once()
-	
+
 	// Perform transcription
 	processor.transcribeAndClear(stream, sessionManager, sessionID)
-	
+
 	// Allow time for goroutine if needed
 	time.Sleep(10 * time.Millisecond)
-	
+
 	// Verify transcript was added to session
 	session, err := sessionManager.GetSession(sessionID)
 	assert.NoError(t, err)
@@ -275,7 +275,7 @@ func TestTranscribeAndClearAddsToSession(t *testing.T) {
 	assert.Equal(t, expectedText, session.Transcripts[0].Text)
 	assert.Equal(t, stream.UserID, session.Transcripts[0].UserID)
 	assert.Equal(t, stream.Username, session.Transcripts[0].Username)
-	
+
 	mockTranscriber.AssertExpectations(t)
 }
 
@@ -284,19 +284,19 @@ func BenchmarkProcessorBufferOperations(b *testing.B) {
 	// Create a stream
 	stream := &Stream{
 		UserID:   "bench-user",
-		Username: "BenchUser", 
+		Username: "BenchUser",
 		Buffer:   new(bytes.Buffer),
 	}
-	
+
 	// Create sample PCM data (one packet)
 	pcmData := make([]byte, 3840) // 960 samples * 2 channels * 2 bytes
-	
+
 	b.ResetTimer()
-	
+
 	for i := 0; i < b.N; i++ {
 		// Write to buffer
 		stream.Buffer.Write(pcmData)
-		
+
 		// Check threshold
 		if stream.Buffer.Len() >= transcriptionBufferSize {
 			stream.Buffer.Reset()
@@ -308,19 +308,19 @@ func BenchmarkProcessorBufferOperations(b *testing.B) {
 func TestPCMConversion(t *testing.T) {
 	// Test data
 	pcmSamples := []int16{-32768, -100, 0, 100, 32767}
-	
+
 	// Convert to bytes (as done in ProcessVoiceReceive)
 	pcmBytes := make([]byte, len(pcmSamples)*2)
 	for i := 0; i < len(pcmSamples); i++ {
 		binary.LittleEndian.PutUint16(pcmBytes[i*2:], uint16(pcmSamples[i]))
 	}
-	
+
 	// Convert back to verify
 	recovered := make([]int16, len(pcmSamples))
 	for i := 0; i < len(pcmSamples); i++ {
 		recovered[i] = int16(binary.LittleEndian.Uint16(pcmBytes[i*2:]))
 	}
-	
+
 	assert.Equal(t, pcmSamples, recovered, "PCM conversion should be lossless")
 }
 
@@ -452,17 +452,17 @@ func TestMultipleSilenceTimers(t *testing.T) {
 
 	// Start first silence timer
 	stream.startSilenceTimer(processor, sessionManager, sessionID)
-	
+
 	// Try to start another timer immediately (should not create a new one)
 	stream.startSilenceTimer(processor, sessionManager, sessionID)
-	
+
 	// Verify only one timer exists
 	stream.mu.Lock()
 	hasTimer := stream.silenceTimer != nil
 	stream.mu.Unlock()
-	
+
 	assert.True(t, hasTimer, "Should have a timer")
-	
+
 	// Clean up timer
 	stream.mu.Lock()
 	if stream.silenceTimer != nil {
@@ -485,7 +485,7 @@ func TestTranscribeAndClearWithSilenceTimer(t *testing.T) {
 		Username: "TestUser",
 		Buffer:   bytes.NewBuffer(make([]byte, 1000)),
 	}
-	
+
 	// Start a silence timer
 	stream.silenceTimer = time.NewTimer(1 * time.Hour) // Long timer that should be cancelled
 
@@ -499,7 +499,7 @@ func TestTranscribeAndClearWithSilenceTimer(t *testing.T) {
 	stream.mu.Lock()
 	timerIsNil := stream.silenceTimer == nil
 	stream.mu.Unlock()
-	
+
 	assert.True(t, timerIsNil, "Silence timer should be nil after transcribeAndClear")
 	mockTranscriber.AssertExpectations(t)
 }
@@ -510,31 +510,31 @@ func TestConfigurationInit(t *testing.T) {
 	origBufferSize := transcriptionBufferSize
 	origSilenceTimeout := silenceTimeout
 	origMinAudioBuffer := minAudioBuffer
-	
+
 	// Test custom environment variables
 	_ = os.Setenv("AUDIO_BUFFER_DURATION_SEC", "5")
 	_ = os.Setenv("AUDIO_SILENCE_TIMEOUT_MS", "3000")
 	_ = os.Setenv("AUDIO_MIN_BUFFER_MS", "500")
-	
+
 	// Re-run init by calling the initialization logic directly
 	// Note: We can't actually re-run init(), so we'll test the logic
 	bufferDuration := 5
 	expectedBufferSize := sampleRate * channels * 2 * bufferDuration // 48000 * 2 * 2 * 5 = 960000
 	assert.Equal(t, 960000, expectedBufferSize, "Buffer size calculation should match expected")
-	
+
 	// Test invalid environment variables (should use defaults)
 	_ = os.Setenv("AUDIO_BUFFER_DURATION_SEC", "invalid")
 	_ = os.Setenv("AUDIO_SILENCE_TIMEOUT_MS", "-100")
 	_ = os.Setenv("AUDIO_MIN_BUFFER_MS", "0")
-	
+
 	// The init function should handle these gracefully and use defaults
 	// In real code, negative or zero values should be rejected
-	
+
 	// Clean up environment
 	_ = os.Unsetenv("AUDIO_BUFFER_DURATION_SEC")
 	_ = os.Unsetenv("AUDIO_SILENCE_TIMEOUT_MS")
 	_ = os.Unsetenv("AUDIO_MIN_BUFFER_MS")
-	
+
 	// Restore original values
 	transcriptionBufferSize = origBufferSize
 	silenceTimeout = origSilenceTimeout
@@ -550,9 +550,9 @@ func TestConcurrentTranscriptionPrevention(t *testing.T) {
 
 	// Create stream with data
 	stream := &Stream{
-		UserID:   "test-user",
-		Username: "TestUser",
-		Buffer:   bytes.NewBuffer(make([]byte, 1000)),
+		UserID:         "test-user",
+		Username:       "TestUser",
+		Buffer:         bytes.NewBuffer(make([]byte, 1000)),
 		isTranscribing: false,
 	}
 
@@ -620,7 +620,7 @@ func TestTranscriptionErrorHandling(t *testing.T) {
 
 	// Verify no transcript was added
 	assert.Empty(t, session.Transcripts, "No transcript should be added on error")
-	
+
 	mockTranscriber.AssertExpectations(t)
 }
 
@@ -648,7 +648,7 @@ func TestTranscribeAndClearEmptyTranscriptionResult(t *testing.T) {
 	session, err := sessionManager.GetSession(sessionID)
 	assert.NoError(t, err)
 	assert.Empty(t, session.Transcripts, "No transcript should be added for empty result")
-	
+
 	mockTranscriber.AssertExpectations(t)
 }
 
@@ -661,9 +661,9 @@ func TestIsTranscribingFlagReset(t *testing.T) {
 
 	// Create stream
 	stream := &Stream{
-		UserID:   "test-user",
-		Username: "TestUser",
-		Buffer:   bytes.NewBuffer(make([]byte, 1000)),
+		UserID:         "test-user",
+		Username:       "TestUser",
+		Buffer:         bytes.NewBuffer(make([]byte, 1000)),
 		isTranscribing: false,
 	}
 

@@ -37,7 +37,7 @@ func init() {
 		Token = os.Getenv("DISCORD_TOKEN")
 	}
 	UserID = os.Getenv("DISCORD_USER_ID")
-	
+
 	// Override transcriber from env if set
 	if envTranscriber := os.Getenv("TRANSCRIBER_TYPE"); envTranscriber != "" {
 		TranscriberType = envTranscriber
