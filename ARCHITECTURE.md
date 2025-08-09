@@ -111,7 +111,8 @@ This creates a manifest that includes both architectures, and Docker automatical
 
 ## Size Comparison
 
-- **AMD64 with CUDA**: ~3.8GB (includes CUDA runtime)
+- **AMD64 with CUDA base**: ~1.5GB (minimal CUDA libraries + dependencies)
+- **AMD64 with CUDA runtime**: ~3.8GB (full CUDA runtime - not recommended)
 - **ARM64 without CUDA**: ~800MB (standard Ubuntu base)
 
 ## Performance Benchmarks

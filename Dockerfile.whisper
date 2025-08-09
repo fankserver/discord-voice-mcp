@@ -25,12 +25,13 @@ RUN CGO_ENABLED=1 go build -ldflags '-w -s' \
 FROM ghcr.io/ggml-org/whisper.cpp:main AS whisper-source
 
 # Architecture-specific base image selection
-# AMD64: Use NVIDIA CUDA runtime for GPU support (Windows/Linux with NVIDIA GPUs)
+# AMD64: Use minimal CUDA base for GPU support (Windows/Linux with NVIDIA GPUs)
 # ARM64: Use standard Ubuntu for Apple Silicon Macs and ARM servers
 ARG TARGETARCH
 
 # Final stage with architecture-specific base
-FROM nvidia/cuda:12.2.0-runtime-ubuntu22.04 AS base-amd64
+# Using cuda-base instead of cuda-runtime saves ~1.5GB
+FROM nvidia/cuda:12.2.0-base-ubuntu22.04 AS base-amd64
 FROM ubuntu:22.04 AS base-arm64
 
 # Select the appropriate base image based on architecture
