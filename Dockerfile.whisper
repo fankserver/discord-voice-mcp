@@ -19,11 +19,14 @@ COPY . .
 RUN CGO_ENABLED=1 go build -ldflags '-w -s' \
     -o discord-voice-mcp ./cmd/discord-voice-mcp
 
-# Use prebuilt whisper.cpp CUDA image to extract binaries
+# Use prebuilt whisper.cpp image to extract binaries
 # This dramatically reduces build time from 2+ hours to minutes
-FROM ghcr.io/ggml-org/whisper.cpp:main-cuda AS whisper-source
+# Using 'main' tag which supports both linux/amd64 and linux/arm64
+# Note: CUDA support is not precompiled in the main image, but it includes
+# CPU optimizations (OpenBLAS) which still provide good performance
+FROM ghcr.io/ggml-org/whisper.cpp:main AS whisper-source
 
-# Final stage - using NVIDIA runtime as base for GPU support
+# Final stage - using NVIDIA runtime as base for GPU support (if available)
 # This image will work with CPU-only as well (graceful fallback)
 FROM nvidia/cuda:12.2.0-runtime-ubuntu22.04
 
@@ -38,21 +41,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libopus0 \
     libgomp1 \
     libopenblas0 \
-    libvulkan1 \
-    mesa-vulkan-drivers \
     && rm -rf /var/lib/apt/lists/*
-
-# Install ROCm runtime for AMD GPU support (optional, only on amd64)
-# hadolint ignore=DL3008,SC2086
-RUN ARCH=$(dpkg --print-architecture) && \
-    if [ "$ARCH" = "amd64" ]; then \
-        apt-get update && \
-        (apt-get install -y --no-install-recommends rocm-libs 2>/dev/null || \
-            echo "Info: ROCm runtime not available, AMD GPU support will be disabled") && \
-        rm -rf /var/lib/apt/lists/*; \
-    else \
-        echo "Info: Skipping ROCm runtime on $ARCH architecture"; \
-    fi
 
 WORKDIR /app
 
@@ -73,15 +62,17 @@ USER mcp
 # Set default transcriber type for whisper image
 ENV TRANSCRIBER_TYPE=whisper
 
-# GPU acceleration is automatically detected at runtime
-# Priority order: CUDA (NVIDIA) -> ROCm (AMD) -> Vulkan (Any GPU) -> OpenBLAS (CPU)
-# To force CPU-only: set WHISPER_USE_GPU=false
+# Note: This image uses CPU-optimized whisper.cpp (OpenBLAS)
+# For GPU acceleration, consider building from source with CUDA/ROCm support
 
 # Run the binary
 CMD ["./discord-voice-mcp"]
 
 # Usage:
-# - NVIDIA GPU: docker run --gpus all ...
-# - AMD GPU: docker run --device=/dev/kfd --device=/dev/dri --group-add video ...
-# - Intel/Other GPU (Vulkan): docker run --device=/dev/dri ...
-# - CPU only: docker run ... (no special flags needed)
+# docker run -i --rm \
+#   -e DISCORD_TOKEN="your-bot-token" \
+#   -e DISCORD_USER_ID="your-discord-user-id" \
+#   -e TRANSCRIBER_TYPE="whisper" \
+#   -e WHISPER_MODEL_PATH="/models/ggml-base.bin" \
+#   -v $(pwd)/models:/models:ro \
+#   ghcr.io/fankserver/discord-voice-mcp:whisper
