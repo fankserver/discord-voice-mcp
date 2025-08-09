@@ -25,16 +25,14 @@ jobs:
     strategy:
       matrix:
         include:
+          # Standard Dockerfile
           - dockerfile: Dockerfile
             suffix: ""
             platforms: linux/amd64,linux/arm64
-          - dockerfile: Dockerfile.minimal
-            suffix: "-minimal"
+          # Whisper Dockerfile with whisper.cpp for local transcription
+          - dockerfile: Dockerfile.whisper
+            suffix: "-whisper"
             platforms: linux/amd64,linux/arm64
-          # Whisper Dockerfile disabled - experimental and requires fixes
-          # - dockerfile: Dockerfile.whisper
-          #   suffix: "-whisper"
-          #   platforms: linux/amd64,linux/arm64
     
     steps:
       - name: Checkout repository
@@ -66,19 +64,13 @@ jobs:
             ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
             # For branches
-            type=ref,event=branch,suffix=${{ matrix.suffix }}
-            # For PRs
-            type=ref,event=pr,suffix=${{ matrix.suffix }}
+            type=ref,event=branch
+            # For PRs  
+            type=ref,event=pr
             # For tags
-            type=ref,event=tag,suffix=${{ matrix.suffix }}
+            type=ref,event=tag
             # Latest tag for main branch
-            type=raw,value=latest${{ matrix.suffix }},enable={{is_default_branch}}
-            # Version tags
-            type=semver,pattern={{version}},suffix=${{ matrix.suffix }}
-            type=semver,pattern={{major}}.{{minor}},suffix=${{ matrix.suffix }}
-            type=semver,pattern={{major}},suffix=${{ matrix.suffix }}
-            # SHA
-            type=sha,prefix={{branch}}-,suffix=${{ matrix.suffix }}
+            type=raw,value=latest,enable={{is_default_branch}}
           flavor: |
             latest=false
       
@@ -133,13 +125,6 @@ jobs:
             --amend ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${TAG}-linux-arm64
           
           docker manifest push ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${TAG}-multiarch
-          
-          # Create manifest for minimal image
-          docker manifest create ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${TAG}-minimal-multiarch \
-            --amend ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${TAG}-minimal-linux-amd64 \
-            --amend ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${TAG}-minimal-linux-arm64
-          
-          docker manifest push ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${TAG}-minimal-multiarch
           
           # Create manifest for whisper image
           docker manifest create ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${TAG}-whisper-multiarch \

@@ -1,11 +1,6 @@
 # Build stage
 FROM golang:1.24-alpine3.21 AS builder
 
-# Build arguments for target platform
-ARG TARGETPLATFORM
-ARG TARGETOS
-ARG TARGETARCH
-
 # Install build dependencies
 # hadolint ignore=DL3018
 RUN apk add --no-cache git gcc musl-dev pkgconfig opus-dev
@@ -19,17 +14,18 @@ RUN go mod download
 # Copy source code
 COPY . .
 
-# Build static binary with CGO
-RUN CGO_ENABLED=1 GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
-    go build -a -tags netgo -ldflags '-w -s -extldflags "-static"' \
+# Build binary with CGO
+# Docker buildx automatically handles cross-compilation via --platform flag
+# Using dynamic linking as static opus lib not available for all architectures
+RUN CGO_ENABLED=1 go build -ldflags '-w -s' \
     -o discord-voice-mcp ./cmd/discord-voice-mcp
 
-# Final stage - using alpine for ffmpeg support
+# Final stage
 FROM alpine:3.20
 
-# Install only ffmpeg (needed for audio processing)
+# Install opus runtime library (required for dynamic linking)
 # hadolint ignore=DL3018
-RUN apk add --no-cache ffmpeg
+RUN apk add --no-cache opus
 
 WORKDIR /app
 
@@ -42,14 +38,9 @@ USER mcp
 
 # Note: No ports exposed as this uses stdin/stdout for MCP protocol
 
-# Audio processing configuration (defaults)
-ENV AUDIO_BUFFER_DURATION_SEC=2 \
-    AUDIO_SILENCE_TIMEOUT_MS=1500 \
-    AUDIO_MIN_BUFFER_MS=100
-
 # Run the binary
 CMD ["./discord-voice-mcp"]
 
-# Expected image size: ~50MB (vs 2.35GB for Node.js version!)
+# Expected image size: ~15-20MB
 # Binary size: ~15MB
-# Alpine + ffmpeg: ~35MB
+# Alpine + opus: ~5MB

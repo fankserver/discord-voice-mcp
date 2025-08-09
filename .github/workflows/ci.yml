@@ -119,8 +119,9 @@ jobs:
           dockerfile: Dockerfile
           failure-threshold: warning
       
-      - name: Run Hadolint on Dockerfile.minimal
+      - name: Run Hadolint on Dockerfile.whisper
         uses: hadolint/hadolint-action@v3.1.0
         with:
-          dockerfile: Dockerfile.minimal
+          dockerfile: Dockerfile.whisper
           failure-threshold: warning
+      
