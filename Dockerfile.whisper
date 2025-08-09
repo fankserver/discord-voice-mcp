@@ -23,6 +23,9 @@ RUN CGO_ENABLED=1 go build -ldflags '-w -s' \
 # Using NVIDIA CUDA base image to support CUDA compilation
 FROM nvidia/cuda:12.2.0-devel-ubuntu22.04 AS whisper-builder
 
+# Set shell with pipefail for better error handling
+SHELL ["/bin/bash", "-o", "pipefail", "-c"]
+
 # Pin to a specific version for reproducible builds
 ARG WHISPER_CPP_VERSION=v1.7.3
 
@@ -36,7 +39,7 @@ ARG GGML_OPENBLAS=ON
 
 # Install build dependencies (combined for efficiency)
 # Includes base tools, OpenBLAS for CPU acceleration, and Vulkan SDK
-RUN apt-get update && apt-get install -y \
+RUN apt-get update && apt-get install -y --no-install-recommends \
     git cmake make g++ pkg-config \
     libopenblas-dev \
     libvulkan-dev vulkan-tools \
@@ -45,7 +48,7 @@ RUN apt-get update && apt-get install -y \
 # Install ROCm headers for AMD GPU support (minimal, for compilation only)
 # Full ROCm is huge, so we just get what's needed for building
 # Note: ROCm may not be available on all architectures, so we handle this gracefully
-RUN apt-get update && apt-get install -y wget gnupg ca-certificates \
+RUN apt-get update && apt-get install -y --no-install-recommends wget gnupg ca-certificates \
     && mkdir -p /etc/apt/keyrings \
     && (wget -qO - https://repo.radeon.com/rocm/rocm.gpg.key | \
         gpg --dearmor -o /etc/apt/keyrings/rocm.gpg || true) \
@@ -84,9 +87,12 @@ RUN cmake -B build \
 # This image will work with CPU-only as well (graceful fallback)
 FROM nvidia/cuda:12.2.0-runtime-ubuntu22.04
 
+# Set shell with pipefail for better error handling
+SHELL ["/bin/bash", "-o", "pipefail", "-c"]
+
 # Install runtime dependencies for all acceleration backends
 # Includes ffmpeg, audio libs, OpenBLAS, Vulkan, and optionally ROCm runtime
-RUN apt-get update && apt-get install -y \
+RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
     libopus0 \
     libgomp1 \

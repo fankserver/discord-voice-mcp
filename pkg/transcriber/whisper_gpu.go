@@ -50,12 +50,12 @@ func NewGPUWhisperTranscriber(modelPath string) (*GPUWhisperTranscriber, error) 
 	// Let whisper.cpp auto-detect the best available backend (CUDA, ROCm, Vulkan, etc.)
 	useGPU := false
 	gpuLayers := 0
-	
+
 	// Check if GPU is requested via environment (defaults to true for whisper image)
 	gpuEnv := os.Getenv("WHISPER_USE_GPU")
 	if gpuEnv == "" || gpuEnv == "true" {
 		useGPU = true
-		
+
 		// Get number of layers to offload to GPU
 		if layers := os.Getenv("WHISPER_GPU_LAYERS"); layers != "" {
 			if l, err := strconv.Atoi(layers); err == nil {
@@ -66,7 +66,7 @@ func NewGPUWhisperTranscriber(modelPath string) (*GPUWhisperTranscriber, error) 
 		} else {
 			gpuLayers = 32 // Default
 		}
-		
+
 		logrus.WithFields(logrus.Fields{
 			"gpu_layers": gpuLayers,
 			"backend":    "auto-detect",
@@ -127,7 +127,7 @@ func NewGPUWhisperTranscriber(modelPath string) (*GPUWhisperTranscriber, error) 
 // Transcribe uses whisper.cpp CLI with optional GPU acceleration
 func (wt *GPUWhisperTranscriber) Transcribe(audio []byte) (string, error) {
 	startTime := time.Now()
-	
+
 	logrus.WithFields(logrus.Fields{
 		"audio_bytes": len(audio),
 		"model":       wt.modelPath,
@@ -174,7 +174,7 @@ func (wt *GPUWhisperTranscriber) Transcribe(audio []byte) (string, error) {
 	if wt.useGPU && wt.gpuLayers > 0 {
 		// For whisper.cpp with CUDA support
 		whisperArgs = append(whisperArgs, "-ngl", strconv.Itoa(wt.gpuLayers))
-		
+
 		// Optional: Add flash attention if supported
 		if os.Getenv("WHISPER_FLASH_ATTN") == "true" {
 			whisperArgs = append(whisperArgs, "-fa")
@@ -215,7 +215,7 @@ func (wt *GPUWhisperTranscriber) Transcribe(audio []byte) (string, error) {
 	duration := time.Since(startTime)
 	audioDuration := time.Duration(len(audio)/96000) * time.Second // 48kHz stereo 16-bit
 	rtf := float64(duration) / float64(audioDuration)
-	
+
 	logrus.WithFields(logrus.Fields{
 		"transcript_length": len(transcript),
 		"processing_time":   duration,
@@ -230,4 +230,3 @@ func (wt *GPUWhisperTranscriber) Transcribe(audio []byte) (string, error) {
 func (wt *GPUWhisperTranscriber) Close() error {
 	return nil
 }
-
