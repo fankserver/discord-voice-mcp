@@ -1,0 +1,74 @@
+# Build stage for Go binary
+FROM golang:1.24-alpine3.20 AS go-builder
+
+# Install build dependencies
+# hadolint ignore=DL3018
+RUN apk add --no-cache git gcc musl-dev
+
+WORKDIR /app
+
+# Copy go mod files
+COPY go.mod go.sum ./
+RUN go mod download
+
+# Copy source code
+COPY . .
+
+# Build static binary with CGO
+RUN CGO_ENABLED=1 GOOS=linux GOARCH=amd64 \
+    go build -a -tags netgo -ldflags '-w -s -extldflags "-static"' \
+    -o discord-voice-mcp ./cmd/discord-voice-mcp
+
+# Build stage for whisper.cpp  
+FROM alpine:3.20 AS whisper-builder
+
+# Install build dependencies for whisper.cpp (including cmake which is now required)
+# hadolint ignore=DL3018
+RUN apk add --no-cache git make g++ bash cmake
+
+# Clone and build whisper.cpp
+WORKDIR /build
+# Pin to a specific version for reproducible builds
+ARG WHISPER_CPP_VERSION=v1.7.3
+RUN git clone --depth 1 --branch ${WHISPER_CPP_VERSION} https://github.com/ggerganov/whisper.cpp.git && \
+    cd whisper.cpp && \
+    cmake -B build -DGGML_CCACHE=OFF . && \
+    cmake --build build --config Release -- -j$(nproc) && \
+    ls -la build/bin/ && \
+    chmod +x build/bin/*
+
+# Final stage
+FROM alpine:3.20
+
+# Install runtime dependencies
+# hadolint ignore=DL3018  
+RUN apk add --no-cache ffmpeg libstdc++ libgomp
+
+WORKDIR /app
+
+# Copy Go binary from builder
+COPY --from=go-builder /app/discord-voice-mcp .
+
+# Copy whisper binaries from builder (rename whisper-cli to whisper)
+COPY --from=whisper-builder /build/whisper.cpp/build/bin/whisper-cli /usr/local/bin/whisper
+COPY --from=whisper-builder /build/whisper.cpp/build/bin/whisper-server /usr/local/bin/whisper-server
+# Copy whisper shared libraries from correct directories
+COPY --from=whisper-builder /build/whisper.cpp/build/src/libwhisper.so* /usr/local/lib/
+COPY --from=whisper-builder /build/whisper.cpp/build/ggml/src/libggml*.so* /usr/local/lib/
+# Update library cache
+RUN ldconfig /usr/local/lib
+
+# Create directories for models
+RUN mkdir -p /models
+
+# Create non-root user
+RUN adduser -D -u 1000 mcp
+USER mcp
+
+# Audio processing configuration (defaults)
+ENV AUDIO_BUFFER_DURATION_SEC=2 \
+    AUDIO_SILENCE_TIMEOUT_MS=1500 \
+    AUDIO_MIN_BUFFER_MS=100
+
+# Run the binary
+CMD ["./discord-voice-mcp"]
