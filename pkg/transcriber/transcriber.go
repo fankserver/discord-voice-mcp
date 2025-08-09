@@ -178,7 +178,6 @@ func (wt *WhisperTranscriber) Transcribe(audio []byte) (string, error) {
 	return transcript, nil
 }
 
-
 func (wt *WhisperTranscriber) Close() error {
 	return nil
 }

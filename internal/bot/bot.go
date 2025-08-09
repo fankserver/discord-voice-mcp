@@ -272,7 +272,7 @@ func (vb *VoiceBot) voiceSpeakingUpdate(s *discordgo.Session, vsu *discordgo.Voi
 				}
 			}
 		}
-		
+
 		// If we couldn't get from state, use minimal info to avoid API calls
 		if username == "" {
 			username = vsu.UserID
