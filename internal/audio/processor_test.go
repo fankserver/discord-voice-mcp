@@ -512,9 +512,9 @@ func TestConfigurationInit(t *testing.T) {
 	origMinAudioBuffer := minAudioBuffer
 	
 	// Test custom environment variables
-	os.Setenv("AUDIO_BUFFER_DURATION_SEC", "5")
-	os.Setenv("AUDIO_SILENCE_TIMEOUT_MS", "3000")
-	os.Setenv("AUDIO_MIN_BUFFER_MS", "500")
+	_ = os.Setenv("AUDIO_BUFFER_DURATION_SEC", "5")
+	_ = os.Setenv("AUDIO_SILENCE_TIMEOUT_MS", "3000")
+	_ = os.Setenv("AUDIO_MIN_BUFFER_MS", "500")
 	
 	// Re-run init by calling the initialization logic directly
 	// Note: We can't actually re-run init(), so we'll test the logic
@@ -523,17 +523,17 @@ func TestConfigurationInit(t *testing.T) {
 	assert.Equal(t, 960000, expectedBufferSize, "Buffer size calculation should match expected")
 	
 	// Test invalid environment variables (should use defaults)
-	os.Setenv("AUDIO_BUFFER_DURATION_SEC", "invalid")
-	os.Setenv("AUDIO_SILENCE_TIMEOUT_MS", "-100")
-	os.Setenv("AUDIO_MIN_BUFFER_MS", "0")
+	_ = os.Setenv("AUDIO_BUFFER_DURATION_SEC", "invalid")
+	_ = os.Setenv("AUDIO_SILENCE_TIMEOUT_MS", "-100")
+	_ = os.Setenv("AUDIO_MIN_BUFFER_MS", "0")
 	
 	// The init function should handle these gracefully and use defaults
 	// In real code, negative or zero values should be rejected
 	
 	// Clean up environment
-	os.Unsetenv("AUDIO_BUFFER_DURATION_SEC")
-	os.Unsetenv("AUDIO_SILENCE_TIMEOUT_MS")
-	os.Unsetenv("AUDIO_MIN_BUFFER_MS")
+	_ = os.Unsetenv("AUDIO_BUFFER_DURATION_SEC")
+	_ = os.Unsetenv("AUDIO_SILENCE_TIMEOUT_MS")
+	_ = os.Unsetenv("AUDIO_MIN_BUFFER_MS")
 	
 	// Restore original values
 	transcriptionBufferSize = origBufferSize

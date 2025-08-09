@@ -222,7 +222,7 @@ func TestFindUserVoiceChannel(t *testing.T) {
 	assert.NoError(t, err)
 	
 	// Initialize bot's Discord state
-	bot.discord.State.Ready.Guilds = []*discordgo.Guild{
+	bot.discord.State.Guilds = []*discordgo.Guild{
 		{ID: "guild1"},
 		{ID: "guild2"},
 	}
@@ -266,7 +266,7 @@ func TestFindUserVoiceChannel(t *testing.T) {
 		ChannelID: "", // Empty channel ID means not in voice
 	})
 	
-	guildID, channelID, err = bot.FindUserVoiceChannel("user-no-channel")
+	_, _, err = bot.FindUserVoiceChannel("user-no-channel")
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "not in any voice channel")
 }
@@ -283,7 +283,7 @@ func TestJoinUserChannel(t *testing.T) {
 	assert.NoError(t, err)
 	
 	// Initialize bot's Discord state
-	bot.discord.State.Ready.Guilds = []*discordgo.Guild{
+	bot.discord.State.Guilds = []*discordgo.Guild{
 		{
 			ID: "guild1",
 			VoiceStates: []*discordgo.VoiceState{

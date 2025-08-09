@@ -308,9 +308,21 @@ func (s *Server) handleGetBotStatus(ctx context.Context, sess *mcp.ServerSession
 	status := s.bot.GetStatus()
 	followUser, autoFollow := s.bot.GetFollowStatus()
 
-	statusText := fmt.Sprintf("Bot Status:\n")
-	statusText += fmt.Sprintf("  Connected: %v\n", status["connected"])
-	statusText += fmt.Sprintf("  In Voice: %v\n", status["inVoice"])
+	statusText := "Bot Status:\n"
+	
+	// Safely get connected status
+	if connected, ok := status["connected"].(bool); ok {
+		statusText += fmt.Sprintf("  Connected: %v\n", connected)
+	} else {
+		statusText += "  Connected: unknown\n"
+	}
+	
+	// Safely get inVoice status
+	if inVoice, ok := status["inVoice"].(bool); ok {
+		statusText += fmt.Sprintf("  In Voice: %v\n", inVoice)
+	} else {
+		statusText += "  In Voice: unknown\n"
+	}
 	
 	if guildID, ok := status["guildID"].(string); ok {
 		statusText += fmt.Sprintf("  Guild ID: %s\n", guildID)

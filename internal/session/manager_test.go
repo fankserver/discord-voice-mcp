@@ -207,8 +207,8 @@ func TestExportSession(t *testing.T) {
 	assert.Len(t, exportedSession.Transcripts, 2)
 	
 	// Clean up
-	os.Remove(filepath)
-	os.RemoveAll("exports")
+	_ = os.Remove(filepath)
+	_ = os.RemoveAll("exports")
 	
 	// Test with non-existent session
 	_, err = manager.ExportSession("non-existent")
@@ -327,7 +327,7 @@ func TestPendingTranscriptionRemovalOnTranscriptAdd(t *testing.T) {
 
 func TestExportDirectoryCreation(t *testing.T) {
 	// Clean up any existing exports directory
-	os.RemoveAll("exports")
+	_ = os.RemoveAll("exports")
 	
 	manager := NewManager()
 	sessionID := manager.CreateSession("guild", "channel")
@@ -346,8 +346,8 @@ func TestExportDirectoryCreation(t *testing.T) {
 	assert.True(t, info.IsDir())
 	
 	// Clean up
-	os.Remove(filepath)
-	os.RemoveAll("exports")
+	_ = os.Remove(filepath)
+	_ = os.RemoveAll("exports")
 }
 
 // TestExportSessionFileSystemErrors tests handling of file system errors during export
@@ -361,8 +361,8 @@ func TestExportSessionFileSystemErrors(t *testing.T) {
 	
 	// Test 1: Directory creation with permission issues
 	// Create exports directory with no write permission
-	os.Mkdir("exports", 0555) // Read and execute only
-	defer os.RemoveAll("exports")
+	_ = os.Mkdir("exports", 0555) // Read and execute only
+	defer func() { _ = os.RemoveAll("exports") }()
 	
 	// Try to export - should fail due to permission
 	filepath, err := manager.ExportSession(sessionID)
@@ -371,11 +371,11 @@ func TestExportSessionFileSystemErrors(t *testing.T) {
 		assert.Contains(t, err.Error(), "error writing file")
 	} else {
 		// Clean up if it succeeded
-		os.Remove(filepath)
+		_ = os.Remove(filepath)
 	}
 	
 	// Clean up and reset
-	os.RemoveAll("exports")
+	_ = os.RemoveAll("exports")
 }
 
 // TestExportSessionInvalidPath tests export with invalid session ID containing path traversal
@@ -393,8 +393,8 @@ func TestExportSessionInvalidPath(t *testing.T) {
 	assert.Contains(t, filepath, "exports/")
 	
 	// Clean up
-	os.Remove(filepath)
-	os.RemoveAll("exports")
+	_ = os.Remove(filepath)
+	_ = os.RemoveAll("exports")
 }
 
 // TestSessionManagerNilChecks tests that all methods handle nil/empty inputs gracefully

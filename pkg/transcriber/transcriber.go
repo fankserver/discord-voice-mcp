@@ -44,6 +44,7 @@ func NewWhisperTranscriber(modelPath string) (*WhisperTranscriber, error) {
 	}
 	
 	// Validate whisper binary works
+	// #nosec G204 - whisperPath comes from exec.LookPath which is safe
 	if err := exec.Command(whisperPath, "--help").Run(); err != nil {
 		return nil, fmt.Errorf("whisper executable found but not working: %w", err)
 	}
@@ -55,6 +56,7 @@ func NewWhisperTranscriber(modelPath string) (*WhisperTranscriber, error) {
 	}
 	
 	// Validate ffmpeg binary works
+	// #nosec G204 - ffmpegPath comes from exec.LookPath which is safe
 	if err := exec.Command(ffmpegPath, "-version").Run(); err != nil {
 		return nil, fmt.Errorf("ffmpeg executable found but not working: %w", err)
 	}
@@ -105,6 +107,7 @@ func (wt *WhisperTranscriber) Transcribe(audio []byte) (string, error) {
 	
 	// Convert PCM to WAV format using ffmpeg
 	// Input: 48kHz, 2 channel, 16-bit signed PCM
+	// #nosec G204 - ffmpegPath is validated during initialization, arguments are hardcoded
 	cmd := exec.Command(wt.ffmpegPath, 
 		"-f", "s16le",      // Input format: signed 16-bit little-endian
 		"-ar", "48000",     // Sample rate: 48kHz

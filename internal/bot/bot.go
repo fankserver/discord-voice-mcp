@@ -85,7 +85,9 @@ func (vb *VoiceBot) JoinChannel(guildID, channelID string) error {
 	}
 	
 	// Enable voice receive
-	vc.Speaking(false)
+	if err := vc.Speaking(false); err != nil {
+		logrus.WithError(err).Debug("Error setting speaking state")
+	}
 	
 	logrus.WithFields(logrus.Fields{
 		"guild_id":   guildID,
@@ -132,8 +134,12 @@ func (vb *VoiceBot) LeaveChannel() {
 func (vb *VoiceBot) FindUserVoiceChannel(userID string) (guildID, channelID string, err error) {
 	// Search across all guilds the bot is in
 	for _, guild := range vb.discord.State.Guilds {
+		// Skip nil guilds (shouldn't happen but defensive programming)
+		if guild == nil {
+			continue
+		}
 		for _, vs := range guild.VoiceStates {
-			if vs.UserID == userID && vs.ChannelID != "" {
+			if vs != nil && vs.UserID == userID && vs.ChannelID != "" {
 				return guild.ID, vs.ChannelID, nil
 			}
 		}
@@ -259,6 +265,11 @@ func (vb *VoiceBot) voiceSpeakingUpdate(s *discordgo.Session, vsu *discordgo.Voi
 		if err != nil {
 			logrus.WithError(err).Warn("Failed to get user information")
 			// Fall back to using just the user ID
+			// Check for overflow before conversion
+			if vsu.SSRC < 0 || vsu.SSRC > int(^uint32(0)) {
+				logrus.WithField("ssrc", vsu.SSRC).Error("SSRC value out of uint32 range")
+				return
+			}
 			vb.ssrcToUser[uint32(vsu.SSRC)] = &UserInfo{
 				UserID:   vsu.UserID,
 				Username: vsu.UserID,
@@ -275,6 +286,11 @@ func (vb *VoiceBot) voiceSpeakingUpdate(s *discordgo.Session, vsu *discordgo.Voi
 			}
 		}
 		
+		// Check for overflow before conversion
+		if vsu.SSRC < 0 || vsu.SSRC > int(^uint32(0)) {
+			logrus.WithField("ssrc", vsu.SSRC).Error("SSRC value out of uint32 range")
+			return
+		}
 		vb.ssrcToUser[uint32(vsu.SSRC)] = &UserInfo{
 			UserID:   vsu.UserID,
 			Username: user.Username,

@@ -119,7 +119,7 @@ func TestHandleExportSessionNonExistent(t *testing.T) {
 	assert.Contains(t, err.Error(), "failed to export session")
 	
 	// Clean up any exports directory that might have been created
-	os.RemoveAll("exports")
+	_ = os.RemoveAll("exports")
 }
 
 func TestHandleJoinMyVoiceChannelNoUserConfigured(t *testing.T) {
@@ -215,8 +215,8 @@ func TestHandleListSessionsWithData(t *testing.T) {
 	session2 := sessionManager.CreateSession("guild2", "channel2")
 	
 	// Add data to sessions
-	sessionManager.AddTranscript(session1, "user1", "User1", "Message 1")
-	sessionManager.AddPendingTranscription(session2, "user2", "User2", 5.0)
+	_ = sessionManager.AddTranscript(session1, "user1", "User1", "Message 1")
+	_ = sessionManager.AddPendingTranscription(session2, "user2", "User2", 5.0)
 
 	// Test listing sessions
 	ctx := context.Background()
@@ -282,8 +282,8 @@ func TestHandleGetTranscriptWithPendingTranscriptions(t *testing.T) {
 
 	// Create session with both completed and pending transcriptions
 	sessionID := sessionManager.CreateSession("guild", "channel")
-	sessionManager.AddTranscript(sessionID, "user1", "User1", "Completed message")
-	sessionManager.AddPendingTranscription(sessionID, "user2", "User2", 3.5)
+	_ = sessionManager.AddTranscript(sessionID, "user1", "User1", "Completed message")
+	_ = sessionManager.AddPendingTranscription(sessionID, "user2", "User2", 3.5)
 
 	// Test getting transcript
 	ctx := context.Background()
