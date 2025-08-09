@@ -37,7 +37,6 @@ RUN git clone --depth 1 --branch ${WHISPER_CPP_VERSION} https://github.com/ggerg
 WORKDIR /build/whisper.cpp
 RUN cmake -B build -DGGML_CCACHE=OFF . && \
     cmake --build build --config Release -- -j$(nproc) && \
-    ls -la build/bin/ && \
     chmod +x build/bin/*
 
 # Final stage
