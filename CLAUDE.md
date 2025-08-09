@@ -115,9 +115,17 @@ CGO_ENABLED=1 go build -a -tags netgo -ldflags '-w -s -extldflags "-static"'
 ### Audio Processing Flow
 1. Discord sends Opus packets via `VoiceConnection.OpusRecv` channel
 2. Processor decodes to PCM (48kHz, stereo)
-3. PCM buffered per user until 2 seconds accumulated
-4. Transcriber called (currently Mock, Whisper/Google pending)
+3. PCM buffered per user with two trigger conditions:
+   - Buffer reaches configured duration (default: 2 seconds)
+   - Silence detected for configured timeout (default: 1.5 seconds)
+4. Transcriber called with accumulated audio
 5. Transcript added to session with timestamp
+
+### Audio Configuration
+Configurable via environment variables:
+- `AUDIO_BUFFER_DURATION_SEC`: Buffer size trigger (default: 2 seconds)
+- `AUDIO_SILENCE_TIMEOUT_MS`: Silence detection timeout (default: 1500ms)
+- `AUDIO_MIN_BUFFER_MS`: Minimum audio before transcription (default: 100ms)
 
 ### Error Handling Patterns
 - Safe type assertions to prevent panics (check `ok` return)

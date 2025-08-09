@@ -26,6 +26,15 @@ type Session struct {
 	StartTime   time.Time    `json:"startTime"`
 	EndTime     *time.Time   `json:"endTime,omitempty"`
 	Transcripts []Transcript `json:"transcripts"`
+	PendingTranscriptions []PendingTranscription `json:"pendingTranscriptions,omitempty"`
+}
+
+// PendingTranscription represents an in-progress transcription
+type PendingTranscription struct {
+	UserID    string    `json:"userId"`
+	Username  string    `json:"username"`
+	StartTime time.Time `json:"startTime"`
+	Duration  float64   `json:"durationSeconds,omitempty"`
 }
 
 // Transcript represents a single transcribed message
@@ -54,6 +63,7 @@ func (m *Manager) CreateSession(guildID, channelID string) string {
 		ChannelID:   channelID,
 		StartTime:   time.Now(),
 		Transcripts: []Transcript{},
+		PendingTranscriptions: []PendingTranscription{},
 	}
 
 	m.sessions[session.ID] = session
@@ -65,6 +75,58 @@ func (m *Manager) CreateSession(guildID, channelID string) string {
 	}).Debug("Session created")
 	
 	return session.ID
+}
+
+// AddPendingTranscription adds a pending transcription to track in-progress work
+func (m *Manager) AddPendingTranscription(sessionID, userID, username string, duration float64) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	session, exists := m.sessions[sessionID]
+	if !exists {
+		logrus.WithField("session_id", sessionID).Error("Session not found for pending transcription")
+		return fmt.Errorf("session %s not found", sessionID)
+	}
+
+	pending := PendingTranscription{
+		UserID:    userID,
+		Username:  username,
+		StartTime: time.Now(),
+		Duration:  duration,
+	}
+
+	session.PendingTranscriptions = append(session.PendingTranscriptions, pending)
+	
+	logrus.WithFields(logrus.Fields{
+		"session_id": sessionID,
+		"user_id":    userID,
+		"username":   username,
+		"duration":   duration,
+	}).Debug("Pending transcription added")
+	
+	return nil
+}
+
+// RemovePendingTranscription removes a pending transcription when it completes
+func (m *Manager) RemovePendingTranscription(sessionID, userID string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	session, exists := m.sessions[sessionID]
+	if !exists {
+		return fmt.Errorf("session %s not found", sessionID)
+	}
+
+	// Remove the pending transcription for this user
+	filtered := make([]PendingTranscription, 0, len(session.PendingTranscriptions))
+	for _, pending := range session.PendingTranscriptions {
+		if pending.UserID != userID {
+			filtered = append(filtered, pending)
+		}
+	}
+	session.PendingTranscriptions = filtered
+	
+	return nil
 }
 
 // AddTranscript adds a transcript to a session
@@ -86,6 +148,15 @@ func (m *Manager) AddTranscript(sessionID, userID, username, text string) error 
 	}
 
 	session.Transcripts = append(session.Transcripts, transcript)
+	
+	// Remove any pending transcription for this user
+	filtered := make([]PendingTranscription, 0, len(session.PendingTranscriptions))
+	for _, pending := range session.PendingTranscriptions {
+		if pending.UserID != userID {
+			filtered = append(filtered, pending)
+		}
+	}
+	session.PendingTranscriptions = filtered
 	
 	logrus.WithFields(logrus.Fields{
 		"session_id":       sessionID,

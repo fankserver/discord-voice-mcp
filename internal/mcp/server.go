@@ -3,6 +3,7 @@ package mcp
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/fankserver/discord-voice-mcp/internal/bot"
 	"github.com/fankserver/discord-voice-mcp/internal/session"
@@ -225,13 +226,26 @@ func (s *Server) handleGetTranscript(ctx context.Context, sess *mcp.ServerSessio
 	}
 
 	// Format session data as text
-	transcript := fmt.Sprintf("Session %s\nStarted: %s\nTranscripts:\n", 
+	transcript := fmt.Sprintf("Session %s\nStarted: %s\n", 
 		sessionData.ID, sessionData.StartTime.Format("2006-01-02 15:04:05"))
+	
+	// Show pending transcriptions if any
+	if len(sessionData.PendingTranscriptions) > 0 {
+		transcript += "\nPending Transcriptions (processing):\n"
+		for _, p := range sessionData.PendingTranscriptions {
+			elapsed := time.Since(p.StartTime).Seconds()
+			transcript += fmt.Sprintf("  ⏳ %s: Processing %.1fs of audio (elapsed: %.1fs)\n", 
+				p.Username, p.Duration, elapsed)
+		}
+	}
+	
+	// Show completed transcripts
+	transcript += "\nTranscripts:\n"
 	for _, t := range sessionData.Transcripts {
 		transcript += fmt.Sprintf("[%s] %s: %s\n", 
 			t.Timestamp.Format("15:04:05"), t.Username, t.Text)
 	}
-
+	
 	return &mcp.CallToolResultFor[struct{}]{
 		Content: []mcp.Content{
 			&mcp.TextContent{Text: transcript},
@@ -251,8 +265,12 @@ func (s *Server) handleListSessions(ctx context.Context, sess *mcp.ServerSession
 	} else {
 		output = fmt.Sprintf("Found %d session(s):\n\n", len(sessions))
 		for _, s := range sessions {
-			output += fmt.Sprintf("Session %s\n  Started: %s\n  Transcripts: %d\n\n",
-				s.ID, s.StartTime.Format("2006-01-02 15:04:05"), len(s.Transcripts))
+			pendingIndicator := ""
+			if len(s.PendingTranscriptions) > 0 {
+				pendingIndicator = fmt.Sprintf(" (⏳ %d pending)", len(s.PendingTranscriptions))
+			}
+			output += fmt.Sprintf("Session %s\n  Started: %s\n  Transcripts: %d%s\n\n",
+				s.ID, s.StartTime.Format("2006-01-02 15:04:05"), len(s.Transcripts), pendingIndicator)
 		}
 	}
 

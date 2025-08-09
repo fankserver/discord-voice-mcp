@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
+	"os"
+	"strconv"
 	"sync"
 	"time"
 
@@ -15,18 +17,69 @@ import (
 )
 
 const (
-	// Audio configuration
+	// Audio configuration (these are fixed by Discord)
 	sampleRate = 48000
 	channels   = 2
 	frameSize  = 960 // 20ms @ 48kHz
-
-	// Buffer configuration
-	transcriptionBufferSize = sampleRate * channels * 2 * 2 // 2 seconds of audio (samples * channels * bytes per sample * seconds)
 	
-	// Silence detection
-	silenceTimeout = 1500 * time.Millisecond // Trigger transcription after 1.5 seconds of silence
-	minAudioBuffer = 4800                     // Minimum audio bytes before considering transcription (100ms of audio)
+	// Default values (can be overridden by environment variables)
+	defaultBufferDurationSec = 2    // Default buffer duration in seconds
+	defaultSilenceTimeoutMs  = 1500 // Default silence timeout in milliseconds
+	defaultMinAudioMs        = 100  // Default minimum audio in milliseconds
 )
+
+// Configurable variables (set from environment or defaults)
+var (
+	// transcriptionBufferSize is the buffer size that triggers transcription
+	transcriptionBufferSize int
+	
+	// silenceTimeout is the duration of silence that triggers transcription
+	silenceTimeout time.Duration
+	
+	// minAudioBuffer is the minimum audio bytes before considering transcription
+	minAudioBuffer int
+)
+
+func init() {
+	// Initialize configuration from environment variables or use defaults
+	
+	// Buffer duration in seconds (AUDIO_BUFFER_DURATION_SEC)
+	bufferDuration := defaultBufferDurationSec
+	if val := os.Getenv("AUDIO_BUFFER_DURATION_SEC"); val != "" {
+		if parsed, err := strconv.Atoi(val); err == nil && parsed > 0 {
+			bufferDuration = parsed
+		}
+	}
+	transcriptionBufferSize = sampleRate * channels * 2 * bufferDuration // samples * channels * bytes per sample * seconds
+	
+	// Silence timeout in milliseconds (AUDIO_SILENCE_TIMEOUT_MS)
+	silenceMs := defaultSilenceTimeoutMs
+	if val := os.Getenv("AUDIO_SILENCE_TIMEOUT_MS"); val != "" {
+		if parsed, err := strconv.Atoi(val); err == nil && parsed > 0 {
+			silenceMs = parsed
+		}
+	}
+	silenceTimeout = time.Duration(silenceMs) * time.Millisecond
+	
+	// Minimum audio in milliseconds (AUDIO_MIN_BUFFER_MS)
+	minAudioMs := defaultMinAudioMs
+	if val := os.Getenv("AUDIO_MIN_BUFFER_MS"); val != "" {
+		if parsed, err := strconv.Atoi(val); err == nil && parsed > 0 {
+			minAudioMs = parsed
+		}
+	}
+	// Calculate minimum buffer size: (samples/sec * channels * bytes/sample * ms) / 1000
+	minAudioBuffer = (sampleRate * channels * 2 * minAudioMs) / 1000
+	
+	// Log configuration
+	logrus.WithFields(logrus.Fields{
+		"buffer_duration_sec": bufferDuration,
+		"buffer_size_bytes":   transcriptionBufferSize,
+		"silence_timeout_ms":  silenceMs,
+		"min_audio_ms":        minAudioMs,
+		"min_audio_bytes":     minAudioBuffer,
+	}).Info("Audio processor configuration loaded")
+}
 
 // Processor handles audio capture and transcription
 type Processor struct {
@@ -233,11 +286,14 @@ func (p *Processor) transcribeAndClear(stream *Stream, sessionManager *session.M
 	stream.Buffer.Reset()
 	stream.mu.Unlock()
 
-	// Always clear the transcribing flag when done
+	// Always clear the transcribing flag and remove pending when done
 	defer func() {
 		stream.mu.Lock()
 		stream.isTranscribing = false
 		stream.mu.Unlock()
+		
+		// Remove pending transcription (even if transcription failed)
+		_ = sessionManager.RemovePendingTranscription(sessionID, stream.UserID)
 	}()
 
 	if len(audioData) == 0 {
@@ -245,8 +301,19 @@ func (p *Processor) transcribeAndClear(stream *Stream, sessionManager *session.M
 		return
 	}
 	
+	// Calculate audio duration in seconds (48kHz, stereo, 16-bit)
+	// bytes / (sample_rate * channels * bytes_per_sample)
+	audioDuration := float64(len(audioData)) / (48000.0 * 2.0 * 2.0)
+	
+	// Add pending transcription before starting
+	err := sessionManager.AddPendingTranscription(sessionID, stream.UserID, stream.Username, audioDuration)
+	if err != nil {
+		logrus.WithError(err).Warn("Failed to add pending transcription")
+	}
+	
 	logrus.WithFields(logrus.Fields{
 		"audio_bytes": len(audioData),
+		"duration_sec": audioDuration,
 		"user":        stream.UserID,
 		"session":     sessionID,
 	}).Info("Starting transcription")
@@ -264,7 +331,7 @@ func (p *Processor) transcribeAndClear(stream *Stream, sessionManager *session.M
 	}).Debug("Transcription completed")
 
 	if text != "" {
-		// Add to session
+		// Add to session (this will also remove the pending transcription)
 		err = sessionManager.AddTranscript(sessionID, stream.UserID, stream.Username, text)
 		if err != nil {
 			logrus.WithError(err).Error("Error adding transcript")
