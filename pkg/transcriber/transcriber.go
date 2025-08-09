@@ -178,12 +178,6 @@ func (wt *WhisperTranscriber) Transcribe(audio []byte) (string, error) {
 	return transcript, nil
 }
 
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}
 
 func (wt *WhisperTranscriber) Close() error {
 	return nil

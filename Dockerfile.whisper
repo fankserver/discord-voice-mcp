@@ -28,7 +28,9 @@ RUN apk add --no-cache git make g++ bash cmake
 
 # Clone and build whisper.cpp
 WORKDIR /build
-RUN git clone https://github.com/ggerganov/whisper.cpp.git && \
+# Pin to a specific version for reproducible builds
+ARG WHISPER_CPP_VERSION=v1.7.3
+RUN git clone --depth 1 --branch ${WHISPER_CPP_VERSION} https://github.com/ggerganov/whisper.cpp.git && \
     cd whisper.cpp && \
     cmake -B build -DGGML_CCACHE=OFF . && \
     cmake --build build --config Release -- -j$(nproc) && \

@@ -260,31 +260,23 @@ func (vb *VoiceBot) voiceSpeakingUpdate(s *discordgo.Session, vsu *discordgo.Voi
 		vb.mu.Lock()
 		defer vb.mu.Unlock()
 
-		// Get user information
-		user, err := s.User(vsu.UserID)
-		if err != nil {
-			logrus.WithError(err).Warn("Failed to get user information")
-			// Fall back to using just the user ID
-			// Check for overflow before conversion
-			if vsu.SSRC < 0 || vsu.SSRC > int(^uint32(0)) {
-				logrus.WithField("ssrc", vsu.SSRC).Error("SSRC value out of uint32 range")
-				return
-			}
-			vb.ssrcToUser[uint32(vsu.SSRC)] = &UserInfo{
-				UserID:   vsu.UserID,
-				Username: vsu.UserID,
-			}
-			return
-		}
-
-		// Get nickname if in a guild
-		nickname := user.Username
+		// Try to get member from guild state to avoid API calls
+		var username, nickname string
 		if vb.voiceConn != nil && vb.voiceConn.GuildID != "" {
-			// Use State.Member to avoid API calls and potential rate limiting
 			member, err := s.State.Member(vb.voiceConn.GuildID, vsu.UserID)
-			if err == nil && member.Nick != "" {
+			if err == nil && member != nil && member.User != nil {
+				username = member.User.Username
 				nickname = member.Nick
+				if nickname == "" {
+					nickname = username
+				}
 			}
+		}
+		
+		// If we couldn't get from state, use minimal info to avoid API calls
+		if username == "" {
+			username = vsu.UserID
+			nickname = vsu.UserID
 		}
 
 		// Check for overflow before conversion
@@ -294,14 +286,14 @@ func (vb *VoiceBot) voiceSpeakingUpdate(s *discordgo.Session, vsu *discordgo.Voi
 		}
 		vb.ssrcToUser[uint32(vsu.SSRC)] = &UserInfo{
 			UserID:   vsu.UserID,
-			Username: user.Username,
+			Username: username,
 			Nickname: nickname,
 		}
 
 		logrus.WithFields(logrus.Fields{
 			"ssrc":     vsu.SSRC,
 			"user_id":  vsu.UserID,
-			"username": user.Username,
+			"username": username,
 			"nickname": nickname,
 		}).Debug("Mapped SSRC to user")
 	}

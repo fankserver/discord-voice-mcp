@@ -303,7 +303,12 @@ func (p *Processor) transcribeAndClear(stream *Stream, sessionManager *session.M
 		stream.mu.Unlock()
 
 		// Remove pending transcription (even if transcription failed)
-		_ = sessionManager.RemovePendingTranscription(sessionID, stream.UserID)
+		if err := sessionManager.RemovePendingTranscription(sessionID, stream.UserID); err != nil {
+			logrus.WithError(err).WithFields(logrus.Fields{
+				"session_id": sessionID,
+				"user_id":    stream.UserID,
+			}).Warn("Failed to remove pending transcription")
+		}
 	}()
 
 	if len(audioData) == 0 {
@@ -313,7 +318,7 @@ func (p *Processor) transcribeAndClear(stream *Stream, sessionManager *session.M
 
 	// Calculate audio duration in seconds (48kHz, stereo, 16-bit)
 	// bytes / (sample_rate * channels * bytes_per_sample)
-	audioDuration := float64(len(audioData)) / (48000.0 * 2.0 * 2.0)
+	audioDuration := float64(len(audioData)) / (float64(sampleRate) * float64(channels) * 2.0) // 2 bytes per sample
 
 	// Add pending transcription before starting
 	err := sessionManager.AddPendingTranscription(sessionID, stream.UserID, stream.Username, audioDuration)

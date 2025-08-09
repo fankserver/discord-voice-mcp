@@ -7,7 +7,6 @@ import (
 	"os/signal"
 	"strings"
 	"syscall"
-	"time"
 
 	"github.com/fankserver/discord-voice-mcp/internal/audio"
 	"github.com/fankserver/discord-voice-mcp/internal/bot"
@@ -32,7 +31,9 @@ func init() {
 	flag.Parse()
 
 	// Load from environment
-	_ = godotenv.Load()
+	if err := godotenv.Load(); err != nil {
+		logrus.WithError(err).Debug("Error loading .env file, using environment variables")
+	}
 	if Token == "" {
 		Token = os.Getenv("DISCORD_TOKEN")
 	}
@@ -151,8 +152,5 @@ func main() {
 	<-ctx.Done()
 
 	logrus.Info("Shutting down gracefully...")
-	// Give components time to clean up
-	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer shutdownCancel()
-	<-shutdownCtx.Done()
+	// Deferred functions will handle cleanup
 }
