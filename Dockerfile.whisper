@@ -84,10 +84,10 @@ WORKDIR /build/whisper.cpp
 RUN ARCH=$(dpkg --print-architecture) && \
     if [ "$ARCH" = "amd64" ]; then \
         ROCM_FLAG="${GGML_ROCM}"; \
-        # Consumer GPUs only: RTX 1000-5000 series
-        # 75=RTX 2000 (Turing), 86=RTX 3000 (Ampere), 89=RTX 4000 (Ada)
-        CUDA_ARCHS="75;86;89"; \
-        echo "Info: Building for consumer CUDA architectures: ${CUDA_ARCHS} (RTX 2000/3000/4000)"; \
+        # Consumer GPUs only: RTX 2000-5000 series
+        # 75=RTX 2000 (Turing), 86=RTX 3000 (Ampere), 89=RTX 4000 (Ada), 90=RTX 5000 (Blackwell)
+        CUDA_ARCHS="75;86;89;90"; \
+        echo "Info: Building for consumer CUDA architectures: ${CUDA_ARCHS} (RTX 2000/3000/4000/5000)"; \
     elif [ "$ARCH" = "arm64" ]; then \
         ROCM_FLAG="OFF"; \
         # Jetson: 87=Orin (most recent)
