@@ -26,6 +26,7 @@ FROM ubuntu:22.04 AS whisper-builder
 ARG TARGETARCH
 
 # Install build dependencies
+# hadolint ignore=DL3008
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     cmake \
@@ -36,8 +37,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # Clone and build whisper.cpp
 WORKDIR /build
-RUN git clone --depth 1 https://github.com/ggml-org/whisper.cpp.git && \
-    cd whisper.cpp && \
+RUN git clone --depth 1 https://github.com/ggml-org/whisper.cpp.git
+
+WORKDIR /build/whisper.cpp
+# hadolint ignore=SC2046
+RUN
     if [ "${TARGETARCH}" = "amd64" ]; then \
         # For AMD64: Enable AVX optimizations
         cmake -B build \
@@ -56,7 +60,7 @@ RUN git clone --depth 1 https://github.com/ggml-org/whisper.cpp.git && \
             -DGGML_ARM_NEON=ON \
             -DBUILD_SHARED_LIBS=ON; \
     fi && \
-    cmake --build build --config Release -j$(nproc)
+    cmake --build build --config Release -j"$(nproc)"
 
 # Architecture-specific base image selection
 # AMD64: Use minimal CUDA base for GPU support (Windows/Linux with NVIDIA GPUs)
@@ -69,6 +73,7 @@ FROM nvidia/cuda:12.2.0-base-ubuntu22.04 AS base-amd64
 FROM ubuntu:22.04 AS base-arm64
 
 # Select the appropriate base image based on architecture
+# hadolint ignore=DL3006
 FROM base-${TARGETARCH} AS final
 
 # Set shell with pipefail for better error handling
