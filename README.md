@@ -244,6 +244,88 @@ For real offline transcription using Whisper:
 ### Google Speech-to-Text (Cloud)
 The Google Speech-to-Text transcriber is implemented but requires Google Cloud credentials configuration (not yet fully integrated).
 
+## ⚙️ Audio Processing Configuration
+
+The audio processing behavior can be customized using environment variables:
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `AUDIO_BUFFER_DURATION_SEC` | `2` | Buffer duration in seconds before triggering transcription |
+| `AUDIO_SILENCE_TIMEOUT_MS` | `1500` | Silence duration in milliseconds that triggers transcription |
+| `AUDIO_MIN_BUFFER_MS` | `100` | Minimum audio duration in milliseconds before transcription |
+| `WHISPER_LANGUAGE` | `auto` | Language code for Whisper transcription (e.g., "en", "de", "es", "auto") |
+| `WHISPER_THREADS` | `4` | Number of threads for Whisper processing (higher = faster but more CPU) |
+| `WHISPER_BEAM_SIZE` | `1` | Beam size for Whisper (1 = fastest, 5 = most accurate) |
+
+### Examples
+
+**Quick transcription with short pauses:**
+```bash
+# Trigger after 1 second buffer or 500ms silence
+docker run -i --rm \
+  -e DISCORD_TOKEN="your-bot-token" \
+  -e DISCORD_USER_ID="your-discord-user-id" \
+  -e AUDIO_BUFFER_DURATION_SEC="1" \
+  -e AUDIO_SILENCE_TIMEOUT_MS="500" \
+  -e AUDIO_MIN_BUFFER_MS="50" \
+  ghcr.io/fankserver/discord-voice-mcp:latest
+```
+
+**Longer recordings with natural pauses:**
+```bash
+# Allow 3 second pauses, 5 second buffer
+docker run -i --rm \
+  -e DISCORD_TOKEN="your-bot-token" \
+  -e DISCORD_USER_ID="your-discord-user-id" \
+  -e AUDIO_BUFFER_DURATION_SEC="5" \
+  -e AUDIO_SILENCE_TIMEOUT_MS="3000" \
+  -e AUDIO_MIN_BUFFER_MS="200" \
+  ghcr.io/fankserver/discord-voice-mcp:latest
+```
+
+**Multilingual transcription (preserve original language):**
+```bash
+# Auto-detect and preserve original language
+docker run -i --rm \
+  -e DISCORD_TOKEN="your-bot-token" \
+  -e DISCORD_USER_ID="your-discord-user-id" \
+  -e WHISPER_LANGUAGE="auto" \
+  ghcr.io/fankserver/discord-voice-mcp:latest
+```
+
+**Force specific language:**
+```bash
+# Force German transcription only
+docker run -i --rm \
+  -e DISCORD_TOKEN="your-bot-token" \
+  -e DISCORD_USER_ID="your-discord-user-id" \
+  -e WHISPER_LANGUAGE="de" \
+  ghcr.io/fankserver/discord-voice-mcp:latest
+```
+
+**Optimize for faster transcription (reduce delay):**
+```bash
+# Use more threads and smaller beam size for speed
+docker run -i --rm \
+  -e DISCORD_TOKEN="your-bot-token" \
+  -e DISCORD_USER_ID="your-discord-user-id" \
+  -e WHISPER_THREADS="8" \
+  -e WHISPER_BEAM_SIZE="1" \
+  -e AUDIO_SILENCE_TIMEOUT_MS="1000" \
+  ghcr.io/fankserver/discord-voice-mcp:whisper
+```
+
+**Optimize for accuracy (slower but better quality):**
+```bash
+# Use default threads but larger beam size
+docker run -i --rm \
+  -e DISCORD_TOKEN="your-bot-token" \
+  -e DISCORD_USER_ID="your-discord-user-id" \
+  -e WHISPER_THREADS="4" \
+  -e WHISPER_BEAM_SIZE="5" \
+  ghcr.io/fankserver/discord-voice-mcp:whisper
+```
+
 ## 🎯 Use Cases
 
 ### Personal Assistant

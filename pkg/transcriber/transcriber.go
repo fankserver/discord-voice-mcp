@@ -20,6 +20,9 @@ type WhisperTranscriber struct {
 	modelPath    string
 	whisperPath  string
 	ffmpegPath   string
+	language     string  // Language code for transcription (e.g., "en", "de", "auto")
+	threads      string  // Number of threads for whisper processing
+	beamSize     string  // Beam size for whisper (1 = faster, 5 = more accurate)
 }
 
 // NewWhisperTranscriber creates a whisper.cpp based transcriber
@@ -54,16 +57,40 @@ func NewWhisperTranscriber(modelPath string) (*WhisperTranscriber, error) {
 		return nil, fmt.Errorf("ffmpeg executable found but not working: %w", err)
 	}
 	
+	// Get language setting from environment variable (default: auto)
+	language := os.Getenv("WHISPER_LANGUAGE")
+	if language == "" {
+		language = "auto"  // Default to auto-detection to preserve original language
+	}
+	
+	// Get thread count (default: 4 for better performance/CPU balance)
+	threads := os.Getenv("WHISPER_THREADS")
+	if threads == "" {
+		threads = "4"
+	}
+	
+	// Get beam size (default: 1 for faster processing, 5 for more accuracy)
+	beamSize := os.Getenv("WHISPER_BEAM_SIZE")
+	if beamSize == "" {
+		beamSize = "1"  // Faster processing by default
+	}
+	
 	logrus.WithFields(logrus.Fields{
-		"whisper": whisperPath,
-		"ffmpeg":  ffmpegPath,
-		"model":   modelPath,
+		"whisper":   whisperPath,
+		"ffmpeg":    ffmpegPath,
+		"model":     modelPath,
+		"language":  language,
+		"threads":   threads,
+		"beam_size": beamSize,
 	}).Info("Whisper transcriber initialized successfully")
 	
 	return &WhisperTranscriber{
 		modelPath:   modelPath,
 		whisperPath: whisperPath,
 		ffmpegPath:  ffmpegPath,
+		language:    language,
+		threads:     threads,
+		beamSize:    beamSize,
 	}, nil
 }
 
@@ -108,8 +135,9 @@ func (wt *WhisperTranscriber) Transcribe(audio []byte) (string, error) {
 	// #nosec G204 - modelPath is controlled by server configuration, not user input
 	whisperCmd := exec.Command(wt.whisperPath,
 		"-m", wt.modelPath,     // Model path
-		"-l", "en",             // Language: English
-		"-t", "8",              // Threads
+		"-l", wt.language,      // Language: configurable, defaults to auto-detect
+		"-t", wt.threads,       // Threads: configurable for performance tuning
+		"-bs", wt.beamSize,     // Beam size: smaller = faster, larger = more accurate
 		"--no-timestamps",      // Don't include timestamps in output
 		"-otxt",                // Output format: plain text
 		"-",                    // Read from stdin
