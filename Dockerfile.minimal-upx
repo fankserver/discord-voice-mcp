@@ -1,0 +1,55 @@
+# Build stage
+FROM golang:1.24-alpine3.20 AS builder
+
+# Install build dependencies (including opus for gopus)
+# hadolint ignore=DL3018
+RUN apk add --no-cache git gcc musl-dev pkgconfig opus-dev
+
+WORKDIR /app
+
+# Copy go mod files
+COPY go.mod go.sum ./
+RUN go mod download
+
+# Copy source code
+COPY . .
+
+# Build dynamic binary with CGO for opus support
+# Use advanced optimization flags for ARM64
+RUN CGO_ENABLED=1 \
+    go build -tags osusergo -trimpath \
+    -ldflags '-w -s' \
+    -o discord-voice-mcp ./cmd/discord-voice-mcp
+
+# UPX compression stage
+FROM alpine:3.20 AS compressor
+
+# Install UPX
+# hadolint ignore=DL3018
+RUN apk add --no-cache upx
+
+WORKDIR /app
+
+# Copy binary from builder
+COPY --from=builder /app/discord-voice-mcp .
+
+# Compress binary with UPX (70% size reduction expected)
+# Use --best for maximum compression
+RUN upx --best --lzma discord-voice-mcp
+
+# Final stage - Google's distroless base image for CGO apps
+FROM gcr.io/distroless/base-debian12
+
+WORKDIR /app
+
+# Copy compressed binary from compressor stage
+COPY --from=compressor /app/discord-voice-mcp .
+
+# Run as non-root user (distroless provides user 'nonroot')
+USER nonroot
+
+ENTRYPOINT ["./discord-voice-mcp"]
+
+# Expected ARM64 size: ~6-8MB (vs 25MB current)
+# - Distroless base: ~2MB
+# - Compressed binary: ~4-6MB (was ~15MB, 70% reduction = ~4.5MB)

@@ -1,0 +1,59 @@
+# Build stage
+FROM golang:1.24-alpine3.20 AS builder
+
+# Install build dependencies (including opus for gopus)
+# hadolint ignore=DL3018
+RUN apk add --no-cache git gcc musl-dev pkgconfig opus-dev
+
+WORKDIR /app
+
+# Copy go mod files
+COPY go.mod go.sum ./
+RUN go mod download
+
+# Copy source code
+COPY . .
+
+# Build optimized dynamic binary with CGO for opus support
+RUN CGO_ENABLED=1 \
+    go build -tags osusergo -trimpath \
+    -ldflags '-w -s' \
+    -o discord-voice-mcp ./cmd/discord-voice-mcp
+
+# UPX compression stage
+FROM alpine:3.20 AS compressor
+
+# Install UPX
+# hadolint ignore=DL3018
+RUN apk add --no-cache upx
+
+WORKDIR /app
+
+# Copy binary from builder
+COPY --from=builder /app/discord-voice-mcp .
+
+# Compress binary with UPX ultra compression for maximum size reduction
+RUN upx --ultra-brute discord-voice-mcp
+
+# Final stage - minimal Alpine with just opus runtime
+FROM alpine:3.20
+
+# Install only opus runtime library (minimal dependencies)
+# hadolint ignore=DL3018
+RUN apk add --no-cache opus
+
+WORKDIR /app
+
+# Copy ultra-compressed binary from compressor stage
+COPY --from=compressor /app/discord-voice-mcp .
+
+# Create non-root user
+RUN adduser -D -u 1000 mcp
+USER mcp
+
+ENTRYPOINT ["./discord-voice-mcp"]
+
+# Expected ARM64 size: ~8-12MB (vs 25MB current)
+# - Alpine base + opus: ~8MB
+# - Ultra-compressed binary: ~2-4MB
+# This should achieve significant size reduction while maintaining full functionality

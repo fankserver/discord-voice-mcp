@@ -1,0 +1,60 @@
+# Build stage with musl for smaller static binaries
+FROM golang:1.24-alpine3.20 AS builder
+
+# Install musl development tools and opus for CGO
+# hadolint ignore=DL3018
+RUN apk add --no-cache \
+    git \
+    musl-dev \
+    gcc \
+    pkgconfig \
+    opus-dev
+
+WORKDIR /app
+
+# Copy go mod files
+COPY go.mod go.sum ./
+RUN go mod download
+
+# Copy source code
+COPY . .
+
+# Build fully static binary with musl for ARM64 optimization
+# Alpine's gcc is already musl-gcc, produces smaller static binaries than glibc
+RUN CGO_ENABLED=1 \
+    go build -tags osusergo -trimpath \
+    -ldflags '-w -s -linkmode external -extldflags "-static"' \
+    -o discord-voice-mcp ./cmd/discord-voice-mcp
+
+# UPX compression stage
+FROM alpine:3.20 AS compressor
+
+# Install UPX
+# hadolint ignore=DL3018
+RUN apk add --no-cache upx
+
+WORKDIR /app
+
+# Copy static binary from builder
+COPY --from=builder /app/discord-voice-mcp .
+
+# Compress with UPX ultra compression
+RUN upx --ultra-brute discord-voice-mcp
+
+# Final stage - Google's smallest distroless image for static binaries
+FROM gcr.io/distroless/static-debian12
+
+WORKDIR /app
+
+# Copy ultra-compressed static binary
+COPY --from=compressor /app/discord-voice-mcp .
+
+# Run as non-root user
+USER nonroot
+
+ENTRYPOINT ["./discord-voice-mcp"]
+
+# Expected ARM64 size: ~3-4MB (vs 25MB current)
+# - Static distroless: ~1.9MB  
+# - Ultra-compressed static binary: ~2-3MB (musl + UPX ultra)
+# This should be the smallest possible image size
