@@ -135,6 +135,7 @@ func (wt *GPUWhisperTranscriber) Transcribe(audio []byte) (string, error) {
 	}).Debug("GPUWhisperTranscriber: Starting transcription")
 
 	// Convert PCM to WAV format using ffmpeg
+	// #nosec G204 - ffmpegPath is validated at initialization
 	cmd := exec.Command(wt.ffmpegPath,
 		"-f", "s16le",
 		"-ar", "48000",
@@ -184,6 +185,7 @@ func (wt *GPUWhisperTranscriber) Transcribe(audio []byte) (string, error) {
 	// Add input from stdin
 	whisperArgs = append(whisperArgs, "-")
 
+	// #nosec G204 - whisperPath is validated at initialization
 	whisperCmd := exec.Command(wt.whisperPath, whisperArgs...)
 	whisperCmd.Stdin = &wavBuf
 

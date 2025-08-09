@@ -52,14 +52,21 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # hadolint ignore=DL3008,SC2086
 RUN ARCH=$(dpkg --print-architecture) && \
     if [ "$ARCH" = "amd64" ]; then \
-        apt-get update && apt-get install -y --no-install-recommends wget gnupg ca-certificates && \
-        mkdir -p /etc/apt/keyrings && \
-        wget -qO - https://repo.radeon.com/rocm/rocm.gpg.key | gpg --dearmor -o /etc/apt/keyrings/rocm.gpg && \
-        echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/rocm.gpg] https://repo.radeon.com/rocm/apt/debian/ ubuntu main" \
-            > /etc/apt/sources.list.d/rocm.list && \
+        echo "Info: Attempting to install ROCm for AMD GPU support on amd64" && \
         apt-get update && \
-        (apt-get install -y --no-install-recommends rocm-dev || \
-            echo "Warning: ROCm dev packages not available, AMD GPU support disabled") && \
+        apt-get install -y --no-install-recommends wget gnupg ca-certificates && \
+        mkdir -p /etc/apt/keyrings && \
+        (wget -qO - https://repo.radeon.com/rocm/rocm.gpg.key | gpg --dearmor -o /etc/apt/keyrings/rocm.gpg || \
+            echo "Warning: Failed to fetch ROCm GPG key") && \
+        if [ -f /etc/apt/keyrings/rocm.gpg ]; then \
+            echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/rocm.gpg] https://repo.radeon.com/rocm/apt/debian/ ubuntu main" \
+                > /etc/apt/sources.list.d/rocm.list && \
+            apt-get update || true && \
+            (apt-get install -y --no-install-recommends rocm-dev 2>/dev/null || \
+                echo "Info: ROCm dev packages not available, continuing without AMD GPU support"); \
+        else \
+            echo "Info: Skipping ROCm repository setup due to missing GPG key"; \
+        fi && \
         rm -rf /var/lib/apt/lists/*; \
     else \
         echo "Info: Skipping ROCm installation on $ARCH architecture"; \
