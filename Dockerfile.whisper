@@ -15,7 +15,7 @@ RUN go mod download
 COPY . .
 
 # Build static binary with CGO
-RUN CGO_ENABLED=1 GOOS=linux GOARCH=amd64 \
+RUN CGO_ENABLED=1 \
     go build -a -tags netgo -ldflags '-w -s -extldflags "-static"' \
     -o discord-voice-mcp ./cmd/discord-voice-mcp
 

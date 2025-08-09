@@ -48,17 +48,17 @@ Minimum permission integer: `3145728` (for OAuth2 URL generator)
 ### Run with Docker (Recommended)
 
 ```bash
-# Run the MCP server with your user ID
-docker run -i --rm \
+# Run with AMD64 (smaller images recommended)
+docker run --platform linux/amd64 -i --rm \
   -e DISCORD_TOKEN="your-bot-token" \
   -e DISCORD_USER_ID="your-discord-user-id" \
   ghcr.io/fankserver/discord-voice-mcp:latest
 
-# Basic usage
-docker run -i --rm \
+# Use minimal image (8MB on AMD64, 25MB on ARM64)
+docker run --platform linux/amd64 -i --rm \
   -e DISCORD_TOKEN="your-bot-token" \
   -e DISCORD_USER_ID="your-discord-user-id" \
-  ghcr.io/fankserver/discord-voice-mcp:latest
+  ghcr.io/fankserver/discord-voice-mcp:minimal
 ```
 
 ### Configure Claude Desktop

@@ -78,17 +78,20 @@ go test -v ./internal/audio
 
 ### Docker Operations
 ```bash
-# Build normal image (~50MB with ffmpeg)
-docker build -t discord-voice-mcp:latest .
+# Single architecture builds (AMD64 recommended for smaller images)
+docker build --platform linux/amd64 -t discord-voice-mcp:latest .        # ~13MB
+docker build --platform linux/arm64 -t discord-voice-mcp:latest .        # ~50MB
 
-# Build minimal image (~12MB, no ffmpeg)
-docker build -f Dockerfile.minimal -t discord-voice-mcp:minimal .
+# Multi-architecture build (requires buildx)
+docker buildx create --name multiarch --use  # one-time setup
+docker buildx build --platform linux/amd64,linux/arm64 -t discord-voice-mcp:latest --push .
 
-# Build Whisper-enabled image
-docker build -f Dockerfile.whisper -t discord-voice-mcp:whisper .
+# Minimal images
+docker build --platform linux/amd64 -f Dockerfile.minimal -t discord-voice-mcp:minimal .  # ~6MB
+docker build --platform linux/arm64 -f Dockerfile.minimal -t discord-voice-mcp:minimal .  # ~25MB
 
-# Run with environment variables
-docker run -e DISCORD_TOKEN="YOUR_TOKEN" -e DISCORD_USER_ID="USER_ID" discord-voice-mcp:latest
+# Run with environment variables (specify platform for consistent behavior)
+docker run --platform linux/amd64 -e DISCORD_TOKEN="YOUR_TOKEN" discord-voice-mcp:latest
 ```
 
 ### Testing Specific Components
@@ -155,12 +158,27 @@ AUDIO_MIN_BUFFER_MS=100       # Minimum audio before transcription (default: 100
 ```
 
 ## Docker Build Optimization
-Three Dockerfile variants:
-- **Dockerfile**: Alpine base with ffmpeg (~50MB)
-- **Dockerfile.minimal**: Scratch base, binary only (~12MB)
-- **Dockerfile.whisper**: Includes Whisper models and dependencies
 
-All use:
+### Architecture Size Differences
+
+| Dockerfile | AMD64 Size | ARM64 Size | Notes |
+|------------|------------|------------|-------|
+| Dockerfile.minimal | ~6MB | ~25MB | Scratch base, static binary |
+| Dockerfile | ~13MB | ~50MB | Alpine + ffmpeg |
+| Dockerfile.whisper | ~200MB | ~300MB | Includes whisper.cpp compilation |
+
+**Why ARM64 is larger:**
+- Static binary compilation eliminates most runtime dependencies
+- Remaining size differences are due to Go binary architecture differences
+- ARM64 Go binaries include additional runtime components
+- Static linking with CGO creates larger ARM64 binaries
+
+**Recommendations:**
+- Use `--platform linux/amd64` for production deployments (smaller images)
+- Use multi-arch builds with `docker buildx` for distribution
+- ARM64 works perfectly, just with larger binary sizes
+
+All Dockerfiles use:
 - Multi-stage builds (builder not in final image)
 - Static binary compilation with CGO
 - Non-root user for security
@@ -181,10 +199,21 @@ Images published to:
 - Google transcriber is stub implementation (returns "not implemented")
 - Whisper transcriber fully implemented but requires whisper.cpp binary
 - Default uses mock transcription for development
+- ARM64 Docker images are ~4x larger than AMD64 due to Go binary architecture differences
+- Static CGO compilation produces larger binaries on ARM64
 
 ## Performance Characteristics
+
+**AMD64 (recommended for production):**
+- Binary size: ~8MB (static with all dependencies)
+- Memory usage: ~10MB idle
+- Startup time: <100ms
+- Docker minimal: ~6MB (scratch base)
+- Docker normal: ~13MB (Alpine + ffmpeg)
+
+**ARM64 (larger but fully functional):**
 - Binary size: ~15MB (static with all dependencies)
 - Memory usage: ~10MB idle
 - Startup time: <100ms
-- Docker minimal: ~12MB
-- Docker with ffmpeg: ~50MB
+- Docker minimal: ~25MB (scratch base)
+- Docker normal: ~50MB (Alpine + ffmpeg)
