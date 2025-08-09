@@ -25,13 +25,14 @@ jobs:
     strategy:
       matrix:
         include:
-          - dockerfile: Dockerfile
-            suffix: ""
-            platforms: linux/amd64,linux/arm64
-          # Minimal Dockerfile disabled - simplifying first
-          # - dockerfile: Dockerfile.minimal
-          #   suffix: "-minimal"
+          # Main Dockerfile disabled - testing minimal build
+          # - dockerfile: Dockerfile
+          #   suffix: ""
           #   platforms: linux/amd64,linux/arm64
+          # Minimal Dockerfile - amd64 only (static linking not available for arm64)
+          - dockerfile: Dockerfile.minimal
+            suffix: "-minimal"
+            platforms: linux/amd64
           # Whisper Dockerfile disabled - experimental and requires fixes
           # - dockerfile: Dockerfile.whisper
           #   suffix: "-whisper"
