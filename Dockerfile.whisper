@@ -21,9 +21,6 @@ RUN CGO_ENABLED=1 go build -ldflags '-w -s' \
 
 # Use prebuilt whisper.cpp CUDA image to extract binaries
 # This dramatically reduces build time from 2+ hours to minutes
-# The ghcr.io/ggml-org/whisper.cpp:main-cuda image includes:
-# - whisper-cli with CUDA, ROCm, Vulkan, and OpenBLAS support
-# - ffmpeg and other required tools
 FROM ghcr.io/ggml-org/whisper.cpp:main-cuda AS whisper-source
 
 # Final stage - using NVIDIA runtime as base for GPU support
@@ -63,10 +60,9 @@ WORKDIR /app
 COPY --from=go-builder /app/discord-voice-mcp .
 
 # Copy whisper binaries from prebuilt image
-# The prebuilt image has whisper-cli in /app
-COPY --from=whisper-source /app/whisper-cli /usr/local/bin/whisper
-# Some versions might have whisper-server, copy if exists
-COPY --from=whisper-source /app/whisper-server /usr/local/bin/whisper-server 2>/dev/null || true
+# The prebuilt image has binaries in /app/build/bin/
+COPY --from=whisper-source /app/build/bin/main /usr/local/bin/whisper
+COPY --from=whisper-source /app/build/bin/server /usr/local/bin/whisper-server
 
 # Create directories and add user
 RUN mkdir -p /models && \
