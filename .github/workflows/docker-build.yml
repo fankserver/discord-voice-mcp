@@ -33,10 +33,10 @@ jobs:
           # - dockerfile: Dockerfile.minimal
           #   suffix: "-minimal"
           #   platforms: linux/amd64
-          # Whisper Dockerfile - starting with amd64 only
+          # Whisper Dockerfile - now with arm64 support
           - dockerfile: Dockerfile.whisper
             suffix: "-whisper"
-            platforms: linux/amd64
+            platforms: linux/amd64,linux/arm64
     
     steps:
       - name: Checkout repository
