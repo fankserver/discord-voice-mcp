@@ -36,7 +36,7 @@ RUN git clone --depth 1 --branch ${WHISPER_CPP_VERSION} https://github.com/ggerg
 # Build whisper.cpp (this layer only rebuilds if source changes)
 WORKDIR /build/whisper.cpp
 RUN cmake -B build -DGGML_CCACHE=OFF . && \
-    cmake --build build --config Release -- -j$(nproc) && \
+    cmake --build build --config Release -- -j"$(nproc)" && \
     chmod +x build/bin/*
 
 # Final stage
@@ -57,14 +57,10 @@ COPY --from=whisper-builder /build/whisper.cpp/build/bin/server /usr/local/bin/w
 # Copy whisper shared libraries from correct directories
 COPY --from=whisper-builder /build/whisper.cpp/build/src/libwhisper.so* /usr/local/lib/
 COPY --from=whisper-builder /build/whisper.cpp/build/ggml/src/libggml*.so* /usr/local/lib/
-# Update library cache
-RUN ldconfig /usr/local/lib
-
-# Create directories for models
-RUN mkdir -p /models
-
-# Create non-root user
-RUN adduser -D -u 1000 mcp
+# Update library cache, create directories, and add user
+RUN ldconfig /usr/local/lib && \
+    mkdir -p /models && \
+    adduser -D -u 1000 mcp
 USER mcp
 
 # Set default transcriber type for whisper image
