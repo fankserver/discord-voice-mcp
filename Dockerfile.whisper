@@ -19,10 +19,44 @@ COPY . .
 RUN CGO_ENABLED=1 go build -ldflags '-w -s' \
     -o discord-voice-mcp ./cmd/discord-voice-mcp
 
-# Use prebuilt whisper.cpp image to extract binaries
-# This dramatically reduces build time from 2+ hours to minutes
-# Using 'main' tag which supports both linux/amd64 and linux/arm64
-FROM ghcr.io/ggml-org/whisper.cpp:main AS whisper-source
+# Build whisper.cpp from source for both architectures
+# This ensures compatibility with both AMD64 and ARM64
+FROM ubuntu:22.04 AS whisper-builder
+
+ARG TARGETARCH
+
+# Install build dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    cmake \
+    git \
+    ca-certificates \
+    libopenblas-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# Clone and build whisper.cpp
+WORKDIR /build
+RUN git clone --depth 1 https://github.com/ggml-org/whisper.cpp.git && \
+    cd whisper.cpp && \
+    if [ "${TARGETARCH}" = "amd64" ]; then \
+        # For AMD64: Enable AVX optimizations
+        cmake -B build \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DGGML_BLAS=ON \
+            -DGGML_BLAS_VENDOR=OpenBLAS \
+            -DGGML_AVX=ON \
+            -DGGML_AVX2=ON \
+            -DBUILD_SHARED_LIBS=ON; \
+    else \
+        # For ARM64: Enable NEON optimizations
+        cmake -B build \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DGGML_BLAS=ON \
+            -DGGML_BLAS_VENDOR=OpenBLAS \
+            -DGGML_ARM_NEON=ON \
+            -DBUILD_SHARED_LIBS=ON; \
+    fi && \
+    cmake --build build --config Release -j$(nproc)
 
 # Architecture-specific base image selection
 # AMD64: Use minimal CUDA base for GPU support (Windows/Linux with NVIDIA GPUs)
@@ -55,14 +89,13 @@ WORKDIR /app
 # Copy Go binary from builder
 COPY --from=go-builder /app/discord-voice-mcp .
 
-# Copy whisper binaries from prebuilt image
-# The prebuilt image has binaries in /app/build/bin/
-COPY --from=whisper-source /app/build/bin/whisper-cli /usr/local/bin/whisper
-COPY --from=whisper-source /app/build/bin/whisper-server /usr/local/bin/whisper-server
+# Copy whisper binaries from builder
+COPY --from=whisper-builder /build/whisper.cpp/build/bin/whisper-cli /usr/local/bin/whisper
+COPY --from=whisper-builder /build/whisper.cpp/build/bin/whisper-server /usr/local/bin/whisper-server
 
 # Copy whisper shared libraries
-COPY --from=whisper-source /app/build/src/libwhisper.so* /usr/local/lib/
-COPY --from=whisper-source /app/build/ggml/src/libggml*.so* /usr/local/lib/
+COPY --from=whisper-builder /build/whisper.cpp/build/src/libwhisper.so* /usr/local/lib/
+COPY --from=whisper-builder /build/whisper.cpp/build/ggml/src/libggml*.so* /usr/local/lib/
 
 # Update library cache
 RUN ldconfig
