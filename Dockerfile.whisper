@@ -31,6 +31,7 @@ ARG WHISPER_CPP_VERSION=v1.7.3
 
 # Build args for GPU support (can be overridden at build time)
 # Default: Build with CUDA, ROCm, Vulkan, and OpenBLAS for maximum compatibility
+# For faster CI builds, you can set GGML_CUDA=OFF
 ARG GGML_CUDA=ON
 ARG GGML_ROCM=ON
 ARG GGML_SYCL=OFF
@@ -83,15 +84,19 @@ WORKDIR /build/whisper.cpp
 RUN ARCH=$(dpkg --print-architecture) && \
     if [ "$ARCH" = "amd64" ]; then \
         ROCM_FLAG="${GGML_ROCM}"; \
-        CUDA_ARCHS="60;61;70;75;80;86;89;90"; \
+        # Consumer GPUs only: RTX 1000-5000 series
+        # 75=RTX 2000 (Turing), 86=RTX 3000 (Ampere), 89=RTX 4000 (Ada)
+        CUDA_ARCHS="75;86;89"; \
+        echo "Info: Building for consumer CUDA architectures: ${CUDA_ARCHS} (RTX 2000/3000/4000)"; \
     elif [ "$ARCH" = "arm64" ]; then \
         ROCM_FLAG="OFF"; \
-        CUDA_ARCHS="53;62;72;87"; \
-        echo "Info: Disabling ROCm on $ARCH architecture, using ARM CUDA architectures"; \
+        # Jetson: 87=Orin (most recent)
+        CUDA_ARCHS="87"; \
+        echo "Info: Disabling ROCm on $ARCH, using Jetson Orin architecture: ${CUDA_ARCHS}"; \
     else \
         ROCM_FLAG="OFF"; \
-        CUDA_ARCHS="60;70;75;80"; \
-        echo "Info: Disabling ROCm on $ARCH architecture"; \
+        CUDA_ARCHS="86"; \
+        echo "Info: Disabling ROCm on $ARCH architecture, using single arch"; \
     fi && \
     cmake -B build \
         -DCMAKE_BUILD_TYPE=Release \
