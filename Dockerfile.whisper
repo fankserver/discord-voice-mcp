@@ -19,32 +19,92 @@ COPY . .
 RUN CGO_ENABLED=1 go build -ldflags '-w -s' \
     -o discord-voice-mcp ./cmd/discord-voice-mcp
 
-# Build stage for whisper.cpp  
-FROM alpine:3.20 AS whisper-builder
+# Build stage for whisper.cpp with multiple acceleration backends
+# Using NVIDIA CUDA base image to support CUDA compilation
+FROM nvidia/cuda:12.2.0-devel-ubuntu22.04 AS whisper-builder
 
 # Pin to a specific version for reproducible builds
 ARG WHISPER_CPP_VERSION=v1.7.3
 
-# Install build dependencies for whisper.cpp (including cmake which is now required)
-# hadolint ignore=DL3018
-RUN apk add --no-cache git make g++ bash cmake
+# Build args for GPU support (can be overridden at build time)
+# Default: Build with CUDA, ROCm, Vulkan, and OpenBLAS for maximum compatibility
+ARG GGML_CUDA=ON
+ARG GGML_ROCM=ON
+ARG GGML_SYCL=OFF
+ARG GGML_VULKAN=ON
+ARG GGML_OPENBLAS=ON
+
+# Install base build dependencies
+RUN apt-get update && apt-get install -y \
+    git cmake make g++ pkg-config \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install OpenBLAS for CPU acceleration (always included as fallback)
+RUN apt-get update && apt-get install -y \
+    libopenblas-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Vulkan SDK for cross-vendor GPU support
+RUN apt-get update && apt-get install -y \
+    libvulkan-dev vulkan-tools \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install ROCm headers for AMD GPU support (minimal, for compilation only)
+# Full ROCm is huge, so we just get what's needed for building
+RUN apt-get update && apt-get install -y \
+    wget \
+    && wget -qO - https://repo.radeon.com/rocm/rocm.gpg.key | apt-key add - \
+    && echo "deb [arch=amd64] https://repo.radeon.com/rocm/apt/debian/ ubuntu main" > /etc/apt/sources.list.d/rocm.list \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends \
+    rocm-dev \
+    || echo "ROCm dev packages not available, continuing without AMD GPU build support" \
+    && rm -rf /var/lib/apt/lists/*
 
 # Clone whisper.cpp (separate layer for better caching)
 WORKDIR /build
 RUN git clone --depth 1 --branch ${WHISPER_CPP_VERSION} https://github.com/ggerganov/whisper.cpp.git
 
-# Build whisper.cpp (this layer only rebuilds if source changes)
+# Build whisper.cpp with multiple acceleration backends
+# Will use first available at runtime: CUDA -> ROCm -> Vulkan -> OpenBLAS
 WORKDIR /build/whisper.cpp
-RUN cmake -B build -DGGML_CCACHE=OFF . && \
+RUN cmake -B build \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DGGML_CCACHE=OFF \
+        -DGGML_OPENBLAS=${GGML_OPENBLAS} \
+        -DGGML_CUDA=${GGML_CUDA} \
+        -DCMAKE_CUDA_ARCHITECTURES="60;61;70;75;80;86;89;90" \
+        -DGGML_ROCM=${GGML_ROCM} \
+        -DGGML_SYCL=${GGML_SYCL} \
+        -DGGML_VULKAN=${GGML_VULKAN} \
+        . && \
     cmake --build build --config Release -- -j"$(nproc)" && \
-    chmod +x build/bin/*
+    chmod +x build/bin/* && \
+    # Show which acceleration backends were built
+    echo "Built with acceleration support:" && \
+    ldd build/bin/main | grep -E "cuda|hip|vulkan|blas" || echo "Checking acceleration..."
 
-# Final stage
-FROM alpine:3.20
+# Final stage - using NVIDIA runtime as base for GPU support
+# This image will work with CPU-only as well (graceful fallback)
+FROM nvidia/cuda:12.2.0-runtime-ubuntu22.04
 
-# Install runtime dependencies (including opus for dynamic linking)
-# hadolint ignore=DL3018
-RUN apk add --no-cache ffmpeg libstdc++ libgomp opus
+# Install runtime dependencies for all acceleration backends
+RUN apt-get update && apt-get install -y \
+    ffmpeg \
+    libopus0 \
+    libgomp1 \
+    libopenblas0 \
+    libvulkan1 \
+    mesa-vulkan-drivers \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install AMD ROCm runtime libraries (small subset needed for runtime)
+# These are optional - if not available, AMD GPU support is disabled
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+    rocm-libs \
+    || echo "ROCm runtime not available, AMD GPU support will be disabled" \
+    && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
@@ -58,13 +118,23 @@ COPY --from=whisper-builder /build/whisper.cpp/build/bin/server /usr/local/bin/w
 COPY --from=whisper-builder /build/whisper.cpp/build/src/libwhisper.so* /usr/local/lib/
 COPY --from=whisper-builder /build/whisper.cpp/build/ggml/src/libggml*.so* /usr/local/lib/
 # Update library cache, create directories, and add user
-RUN ldconfig /usr/local/lib && \
+RUN ldconfig && \
     mkdir -p /models && \
-    adduser -D -u 1000 mcp
+    useradd -m -u 1000 -s /bin/bash mcp
 USER mcp
 
 # Set default transcriber type for whisper image
 ENV TRANSCRIBER_TYPE=whisper
 
+# GPU acceleration is automatically detected at runtime
+# Priority order: CUDA (NVIDIA) -> ROCm (AMD) -> Vulkan (Any GPU) -> OpenBLAS (CPU)
+# To force CPU-only: set WHISPER_USE_GPU=false
+
 # Run the binary
 CMD ["./discord-voice-mcp"]
+
+# Usage:
+# - NVIDIA GPU: docker run --gpus all ...
+# - AMD GPU: docker run --device=/dev/kfd --device=/dev/dri --group-add video ...
+# - Intel/Other GPU (Vulkan): docker run --device=/dev/dri ...
+# - CPU only: docker run ... (no special flags needed)
