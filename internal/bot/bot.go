@@ -280,7 +280,8 @@ func (vb *VoiceBot) voiceSpeakingUpdate(s *discordgo.Session, vsu *discordgo.Voi
 		// Get nickname if in a guild
 		nickname := user.Username
 		if vb.voiceConn != nil && vb.voiceConn.GuildID != "" {
-			member, err := s.GuildMember(vb.voiceConn.GuildID, vsu.UserID)
+			// Use State.Member to avoid API calls and potential rate limiting
+			member, err := s.State.Member(vb.voiceConn.GuildID, vsu.UserID)
 			if err == nil && member.Nick != "" {
 				nickname = member.Nick
 			}
