@@ -1,12 +1,17 @@
 package mcp
 
 import (
+	"context"
+	"os"
 	"testing"
 
 	"github.com/fankserver/discord-voice-mcp/internal/bot"
 	"github.com/fankserver/discord-voice-mcp/internal/session"
 	"github.com/fankserver/discord-voice-mcp/internal/audio"
 	"github.com/fankserver/discord-voice-mcp/pkg/transcriber"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestNewServer(t *testing.T) {
@@ -62,4 +67,243 @@ func TestServerToolRegistration(t *testing.T) {
 	if server.mcpServer == nil {
 		t.Fatal("MCP server should be initialized with tools")
 	}
+}
+
+func TestHandleGetTranscriptNonExistentSession(t *testing.T) {
+	// Setup
+	sessionManager := session.NewManager()
+	trans := &transcriber.MockTranscriber{}
+	audioProcessor := audio.NewProcessor(trans)
+	voiceBot, _ := bot.New("test-token", sessionManager, audioProcessor)
+	server := NewServer(voiceBot, sessionManager, "test-user-id")
+
+	// Test getting transcript for non-existent session
+	ctx := context.Background()
+	sess := &mcp.ServerSession{}
+	params := &mcp.CallToolParamsFor[GetTranscriptInput]{
+		Arguments: GetTranscriptInput{
+			SessionID: "non-existent-session",
+		},
+	}
+
+	result, err := server.handleGetTranscript(ctx, sess, params)
+	
+	// Should return an error for non-existent session
+	assert.Error(t, err)
+	assert.Nil(t, result)
+	assert.Contains(t, err.Error(), "session not found")
+}
+
+func TestHandleExportSessionNonExistent(t *testing.T) {
+	// Setup
+	sessionManager := session.NewManager()
+	trans := &transcriber.MockTranscriber{}
+	audioProcessor := audio.NewProcessor(trans)
+	voiceBot, _ := bot.New("test-token", sessionManager, audioProcessor)
+	server := NewServer(voiceBot, sessionManager, "test-user-id")
+
+	// Test exporting non-existent session
+	ctx := context.Background()
+	sess := &mcp.ServerSession{}
+	params := &mcp.CallToolParamsFor[ExportSessionInput]{
+		Arguments: ExportSessionInput{
+			SessionID: "non-existent-session",
+		},
+	}
+
+	result, err := server.handleExportSession(ctx, sess, params)
+	
+	// Should return an error for non-existent session
+	assert.Error(t, err)
+	assert.Nil(t, result)
+	assert.Contains(t, err.Error(), "failed to export session")
+	
+	// Clean up any exports directory that might have been created
+	os.RemoveAll("exports")
+}
+
+func TestHandleJoinMyVoiceChannelNoUserConfigured(t *testing.T) {
+	// Setup with empty user ID
+	sessionManager := session.NewManager()
+	trans := &transcriber.MockTranscriber{}
+	audioProcessor := audio.NewProcessor(trans)
+	voiceBot, _ := bot.New("test-token", sessionManager, audioProcessor)
+	server := NewServer(voiceBot, sessionManager, "") // Empty user ID
+
+	// Test joining "my" channel with no user configured
+	ctx := context.Background()
+	sess := &mcp.ServerSession{}
+	params := &mcp.CallToolParamsFor[EmptyInput]{
+		Arguments: EmptyInput{},
+	}
+
+	result, err := server.handleJoinMyVoiceChannel(ctx, sess, params)
+	
+	// Should return a message about no user configured
+	assert.NoError(t, err)
+	assert.NotNil(t, result)
+	assert.Len(t, result.Content, 1)
+	textContent, ok := result.Content[0].(*mcp.TextContent)
+	require.True(t, ok)
+	assert.Contains(t, textContent.Text, "No user ID configured")
+}
+
+func TestHandleFollowMeNoUserConfigured(t *testing.T) {
+	// Setup with empty user ID
+	sessionManager := session.NewManager()
+	trans := &transcriber.MockTranscriber{}
+	audioProcessor := audio.NewProcessor(trans)
+	voiceBot, _ := bot.New("test-token", sessionManager, audioProcessor)
+	server := NewServer(voiceBot, sessionManager, "") // Empty user ID
+
+	// Test follow me with no user configured
+	ctx := context.Background()
+	sess := &mcp.ServerSession{}
+	params := &mcp.CallToolParamsFor[FollowMeInput]{
+		Arguments: FollowMeInput{
+			Enabled: true,
+		},
+	}
+
+	result, err := server.handleFollowMe(ctx, sess, params)
+	
+	// Should return a message about no user configured
+	assert.NoError(t, err)
+	assert.NotNil(t, result)
+	assert.Len(t, result.Content, 1)
+	textContent, ok := result.Content[0].(*mcp.TextContent)
+	require.True(t, ok)
+	assert.Contains(t, textContent.Text, "No user ID configured")
+}
+
+func TestHandleListSessionsEmpty(t *testing.T) {
+	// Setup
+	sessionManager := session.NewManager()
+	trans := &transcriber.MockTranscriber{}
+	audioProcessor := audio.NewProcessor(trans)
+	voiceBot, _ := bot.New("test-token", sessionManager, audioProcessor)
+	server := NewServer(voiceBot, sessionManager, "test-user-id")
+
+	// Test listing sessions when none exist
+	ctx := context.Background()
+	sess := &mcp.ServerSession{}
+	params := &mcp.CallToolParamsFor[EmptyInput]{
+		Arguments: EmptyInput{},
+	}
+
+	result, err := server.handleListSessions(ctx, sess, params)
+	
+	// Should succeed with "No sessions found" message
+	assert.NoError(t, err)
+	assert.NotNil(t, result)
+	assert.Len(t, result.Content, 1)
+	textContent, ok := result.Content[0].(*mcp.TextContent)
+	require.True(t, ok)
+	assert.Contains(t, textContent.Text, "No sessions found")
+}
+
+func TestHandleListSessionsWithData(t *testing.T) {
+	// Setup
+	sessionManager := session.NewManager()
+	trans := &transcriber.MockTranscriber{}
+	audioProcessor := audio.NewProcessor(trans)
+	voiceBot, _ := bot.New("test-token", sessionManager, audioProcessor)
+	server := NewServer(voiceBot, sessionManager, "test-user-id")
+
+	// Create some sessions
+	session1 := sessionManager.CreateSession("guild1", "channel1")
+	session2 := sessionManager.CreateSession("guild2", "channel2")
+	
+	// Add data to sessions
+	sessionManager.AddTranscript(session1, "user1", "User1", "Message 1")
+	sessionManager.AddPendingTranscription(session2, "user2", "User2", 5.0)
+
+	// Test listing sessions
+	ctx := context.Background()
+	sess := &mcp.ServerSession{}
+	params := &mcp.CallToolParamsFor[EmptyInput]{
+		Arguments: EmptyInput{},
+	}
+
+	result, err := server.handleListSessions(ctx, sess, params)
+	
+	// Should succeed and show both sessions
+	assert.NoError(t, err)
+	assert.NotNil(t, result)
+	assert.Len(t, result.Content, 1)
+	textContent, ok := result.Content[0].(*mcp.TextContent)
+	require.True(t, ok)
+	assert.Contains(t, textContent.Text, "Found 2 session(s)")
+	assert.Contains(t, textContent.Text, session1)
+	assert.Contains(t, textContent.Text, session2)
+	assert.Contains(t, textContent.Text, "1 pending") // Session 2 has pending
+}
+
+func TestHandleGetBotStatus(t *testing.T) {
+	// Setup
+	sessionManager := session.NewManager()
+	trans := &transcriber.MockTranscriber{}
+	audioProcessor := audio.NewProcessor(trans)
+	voiceBot, _ := bot.New("test-token", sessionManager, audioProcessor)
+	server := NewServer(voiceBot, sessionManager, "test-user-id")
+
+	// Set follow status
+	voiceBot.SetFollowUser("test-user-id", true)
+
+	// Test getting bot status
+	ctx := context.Background()
+	sess := &mcp.ServerSession{}
+	params := &mcp.CallToolParamsFor[EmptyInput]{
+		Arguments: EmptyInput{},
+	}
+
+	result, err := server.handleGetBotStatus(ctx, sess, params)
+	
+	// Should succeed
+	assert.NoError(t, err)
+	assert.NotNil(t, result)
+	assert.Len(t, result.Content, 1)
+	textContent, ok := result.Content[0].(*mcp.TextContent)
+	require.True(t, ok)
+	assert.Contains(t, textContent.Text, "Bot Status")
+	assert.Contains(t, textContent.Text, "Connected:")
+	assert.Contains(t, textContent.Text, "In Voice:")
+	assert.Contains(t, textContent.Text, "Following User: test-user-id")
+	assert.Contains(t, textContent.Text, "Auto-Follow: true")
+}
+
+func TestHandleGetTranscriptWithPendingTranscriptions(t *testing.T) {
+	// Setup
+	sessionManager := session.NewManager()
+	trans := &transcriber.MockTranscriber{}
+	audioProcessor := audio.NewProcessor(trans)
+	voiceBot, _ := bot.New("test-token", sessionManager, audioProcessor)
+	server := NewServer(voiceBot, sessionManager, "test-user-id")
+
+	// Create session with both completed and pending transcriptions
+	sessionID := sessionManager.CreateSession("guild", "channel")
+	sessionManager.AddTranscript(sessionID, "user1", "User1", "Completed message")
+	sessionManager.AddPendingTranscription(sessionID, "user2", "User2", 3.5)
+
+	// Test getting transcript
+	ctx := context.Background()
+	sess := &mcp.ServerSession{}
+	params := &mcp.CallToolParamsFor[GetTranscriptInput]{
+		Arguments: GetTranscriptInput{
+			SessionID: sessionID,
+		},
+	}
+
+	result, err := server.handleGetTranscript(ctx, sess, params)
+	
+	// Should succeed and show both completed and pending
+	assert.NoError(t, err)
+	assert.NotNil(t, result)
+	assert.Len(t, result.Content, 1)
+	textContent, ok := result.Content[0].(*mcp.TextContent)
+	require.True(t, ok)
+	assert.Contains(t, textContent.Text, "Completed message")
+	assert.Contains(t, textContent.Text, "Pending Transcriptions")
+	assert.Contains(t, textContent.Text, "User2")
+	assert.Contains(t, textContent.Text, "3.5s")
 }

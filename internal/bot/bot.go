@@ -119,11 +119,12 @@ func (vb *VoiceBot) LeaveChannel() {
 			logrus.WithError(err).Debug("Error disconnecting from voice channel")
 		}
 		vb.voiceConn = nil
-		
-		// Clear SSRC mappings when leaving channel
-		vb.ssrcToUser = make(map[uint32]*UserInfo)
-		
 		logrus.Info("Left voice channel")
+	}
+	
+	// Always clear SSRC mappings when leaving channel
+	for k := range vb.ssrcToUser {
+		delete(vb.ssrcToUser, k)
 	}
 }
 

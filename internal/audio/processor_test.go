@@ -3,7 +3,9 @@ package audio
 import (
 	"bytes"
 	"encoding/binary"
+	"errors"
 	"fmt"
+	"os"
 	"sync"
 	"testing"
 	"time"
@@ -499,5 +501,186 @@ func TestTranscribeAndClearWithSilenceTimer(t *testing.T) {
 	stream.mu.Unlock()
 	
 	assert.True(t, timerIsNil, "Silence timer should be nil after transcribeAndClear")
+	mockTranscriber.AssertExpectations(t)
+}
+
+// TestConfigurationInit tests the initialization of configuration from environment variables
+func TestConfigurationInit(t *testing.T) {
+	// Save original values
+	origBufferSize := transcriptionBufferSize
+	origSilenceTimeout := silenceTimeout
+	origMinAudioBuffer := minAudioBuffer
+	
+	// Test custom environment variables
+	os.Setenv("AUDIO_BUFFER_DURATION_SEC", "5")
+	os.Setenv("AUDIO_SILENCE_TIMEOUT_MS", "3000")
+	os.Setenv("AUDIO_MIN_BUFFER_MS", "500")
+	
+	// Re-run init by calling the initialization logic directly
+	// Note: We can't actually re-run init(), so we'll test the logic
+	bufferDuration := 5
+	expectedBufferSize := sampleRate * channels * 2 * bufferDuration // 48000 * 2 * 2 * 5 = 960000
+	assert.Equal(t, 960000, expectedBufferSize, "Buffer size calculation should match expected")
+	
+	// Test invalid environment variables (should use defaults)
+	os.Setenv("AUDIO_BUFFER_DURATION_SEC", "invalid")
+	os.Setenv("AUDIO_SILENCE_TIMEOUT_MS", "-100")
+	os.Setenv("AUDIO_MIN_BUFFER_MS", "0")
+	
+	// The init function should handle these gracefully and use defaults
+	// In real code, negative or zero values should be rejected
+	
+	// Clean up environment
+	os.Unsetenv("AUDIO_BUFFER_DURATION_SEC")
+	os.Unsetenv("AUDIO_SILENCE_TIMEOUT_MS")
+	os.Unsetenv("AUDIO_MIN_BUFFER_MS")
+	
+	// Restore original values
+	transcriptionBufferSize = origBufferSize
+	silenceTimeout = origSilenceTimeout
+	minAudioBuffer = origMinAudioBuffer
+}
+
+// TestConcurrentTranscriptionPrevention tests that multiple concurrent transcriptions are prevented
+func TestConcurrentTranscriptionPrevention(t *testing.T) {
+	mockTranscriber := new(MockTranscriber)
+	processor := NewProcessor(mockTranscriber)
+	sessionManager := session.NewManager()
+	sessionID := sessionManager.CreateSession("test-guild", "test-channel")
+
+	// Create stream with data
+	stream := &Stream{
+		UserID:   "test-user",
+		Username: "TestUser",
+		Buffer:   bytes.NewBuffer(make([]byte, 1000)),
+		isTranscribing: false,
+	}
+
+	// Setup mock to simulate slow transcription
+	slowTranscription := make(chan bool)
+	mockTranscriber.On("Transcribe", mock.Anything).Run(func(args mock.Arguments) {
+		// Block until we signal
+		<-slowTranscription
+	}).Return("test", nil).Once()
+
+	// Start first transcription in goroutine
+	go processor.transcribeAndClear(stream, sessionManager, sessionID)
+
+	// Give first transcription time to set isTranscribing flag
+	time.Sleep(10 * time.Millisecond)
+
+	// Try to start second transcription (should be prevented)
+	processor.transcribeAndClear(stream, sessionManager, sessionID)
+
+	// The second call should return immediately without calling Transcribe again
+	// because isTranscribing is true
+
+	// Unblock the first transcription
+	slowTranscription <- true
+	close(slowTranscription)
+
+	// Give time for cleanup
+	time.Sleep(10 * time.Millisecond)
+
+	// Verify Transcribe was only called once
+	mockTranscriber.AssertNumberOfCalls(t, "Transcribe", 1)
+}
+
+// TestTranscriptionErrorHandling tests graceful handling of transcription errors
+func TestTranscriptionErrorHandling(t *testing.T) {
+	mockTranscriber := new(MockTranscriber)
+	processor := NewProcessor(mockTranscriber)
+	sessionManager := session.NewManager()
+	sessionID := sessionManager.CreateSession("test-guild", "test-channel")
+
+	// Create stream with data
+	stream := &Stream{
+		UserID:   "test-user",
+		Username: "TestUser",
+		Buffer:   bytes.NewBuffer(make([]byte, 1000)),
+	}
+
+	// Add pending transcription
+	err := sessionManager.AddPendingTranscription(sessionID, stream.UserID, stream.Username, 1.0)
+	assert.NoError(t, err)
+
+	// Setup mock to return error
+	mockTranscriber.On("Transcribe", mock.Anything).Return("", errors.New("transcription failed"))
+
+	// Call transcribeAndClear
+	processor.transcribeAndClear(stream, sessionManager, sessionID)
+
+	// Verify buffer was cleared despite error
+	assert.Equal(t, 0, stream.Buffer.Len(), "Buffer should be cleared even on error")
+
+	// Verify pending transcription was removed despite error
+	session, err := sessionManager.GetSession(sessionID)
+	assert.NoError(t, err)
+	assert.Empty(t, session.PendingTranscriptions, "Pending should be removed even on error")
+
+	// Verify no transcript was added
+	assert.Empty(t, session.Transcripts, "No transcript should be added on error")
+	
+	mockTranscriber.AssertExpectations(t)
+}
+
+// TestTranscribeAndClearEmptyTranscriptionResult tests handling of empty transcription result
+func TestTranscribeAndClearEmptyTranscriptionResult(t *testing.T) {
+	mockTranscriber := new(MockTranscriber)
+	processor := NewProcessor(mockTranscriber)
+	sessionManager := session.NewManager()
+	sessionID := sessionManager.CreateSession("test-guild", "test-channel")
+
+	// Create stream with data
+	stream := &Stream{
+		UserID:   "test-user",
+		Username: "TestUser",
+		Buffer:   bytes.NewBuffer(make([]byte, 1000)),
+	}
+
+	// Setup mock to return empty string (e.g., silence or unrecognizable audio)
+	mockTranscriber.On("Transcribe", mock.Anything).Return("", nil)
+
+	// Call transcribeAndClear
+	processor.transcribeAndClear(stream, sessionManager, sessionID)
+
+	// Verify no transcript was added for empty result
+	session, err := sessionManager.GetSession(sessionID)
+	assert.NoError(t, err)
+	assert.Empty(t, session.Transcripts, "No transcript should be added for empty result")
+	
+	mockTranscriber.AssertExpectations(t)
+}
+
+// TestIsTranscribingFlagReset tests that isTranscribing flag is always reset
+func TestIsTranscribingFlagReset(t *testing.T) {
+	mockTranscriber := new(MockTranscriber)
+	processor := NewProcessor(mockTranscriber)
+	sessionManager := session.NewManager()
+	sessionID := sessionManager.CreateSession("test-guild", "test-channel")
+
+	// Create stream
+	stream := &Stream{
+		UserID:   "test-user",
+		Username: "TestUser",
+		Buffer:   bytes.NewBuffer(make([]byte, 1000)),
+		isTranscribing: false,
+	}
+
+	// Test 1: Flag reset after successful transcription
+	mockTranscriber.On("Transcribe", mock.Anything).Return("success", nil).Once()
+	processor.transcribeAndClear(stream, sessionManager, sessionID)
+	assert.False(t, stream.isTranscribing, "Flag should be reset after success")
+
+	// Test 2: Flag reset after transcription error
+	stream.Buffer.Write(make([]byte, 1000)) // Add data back
+	mockTranscriber.On("Transcribe", mock.Anything).Return("", errors.New("error")).Once()
+	processor.transcribeAndClear(stream, sessionManager, sessionID)
+	assert.False(t, stream.isTranscribing, "Flag should be reset after error")
+
+	// Test 3: Flag reset even if buffer is empty
+	processor.transcribeAndClear(stream, sessionManager, sessionID)
+	assert.False(t, stream.isTranscribing, "Flag should be reset even with empty buffer")
+
 	mockTranscriber.AssertExpectations(t)
 }

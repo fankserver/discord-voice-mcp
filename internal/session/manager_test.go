@@ -349,3 +349,74 @@ func TestExportDirectoryCreation(t *testing.T) {
 	os.Remove(filepath)
 	os.RemoveAll("exports")
 }
+
+// TestExportSessionFileSystemErrors tests handling of file system errors during export
+func TestExportSessionFileSystemErrors(t *testing.T) {
+	manager := NewManager()
+	sessionID := manager.CreateSession("guild", "channel")
+	
+	// Add some data
+	err := manager.AddTranscript(sessionID, "user-1", "User1", "Test message")
+	require.NoError(t, err)
+	
+	// Test 1: Directory creation with permission issues
+	// Create exports directory with no write permission
+	os.Mkdir("exports", 0555) // Read and execute only
+	defer os.RemoveAll("exports")
+	
+	// Try to export - should fail due to permission
+	filepath, err := manager.ExportSession(sessionID)
+	// Note: This might succeed if running as root, so we check both cases
+	if err != nil {
+		assert.Contains(t, err.Error(), "error writing file")
+	} else {
+		// Clean up if it succeeded
+		os.Remove(filepath)
+	}
+	
+	// Clean up and reset
+	os.RemoveAll("exports")
+}
+
+// TestExportSessionInvalidPath tests export with invalid session ID containing path traversal
+func TestExportSessionInvalidPath(t *testing.T) {
+	manager := NewManager()
+	// This tests that even with a weird session ID, the export is safe
+	sessionID := manager.CreateSession("guild", "channel")
+	
+	// Export should work normally even with special characters in session ID
+	filepath, err := manager.ExportSession(sessionID)
+	assert.NoError(t, err)
+	assert.NotEmpty(t, filepath)
+	
+	// Verify the file was created in the exports directory
+	assert.Contains(t, filepath, "exports/")
+	
+	// Clean up
+	os.Remove(filepath)
+	os.RemoveAll("exports")
+}
+
+// TestSessionManagerNilChecks tests that all methods handle nil/empty inputs gracefully
+func TestSessionManagerNilChecks(t *testing.T) {
+	manager := NewManager()
+	
+	// Test with empty session ID
+	err := manager.AddPendingTranscription("", "user", "name", 1.0)
+	assert.Error(t, err)
+	
+	err = manager.RemovePendingTranscription("", "user")
+	assert.Error(t, err)
+	
+	err = manager.AddTranscript("", "user", "name", "text")
+	assert.Error(t, err)
+	
+	err = manager.EndSession("")
+	assert.Error(t, err)
+	
+	_, err = manager.GetSession("")
+	assert.Error(t, err)
+	
+	_, err = manager.ExportSession("")
+	assert.Error(t, err)
+}

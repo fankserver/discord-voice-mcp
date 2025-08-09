@@ -5,6 +5,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/bwmarrin/discordgo"
 	"github.com/fankserver/discord-voice-mcp/internal/audio"
 	"github.com/fankserver/discord-voice-mcp/internal/session"
 	"github.com/fankserver/discord-voice-mcp/pkg/transcriber"
@@ -209,4 +210,102 @@ func TestLeaveChannelClearsSSRCMappings(t *testing.T) {
 	bot.mu.Lock()
 	assert.Empty(t, bot.ssrcToUser)
 	bot.mu.Unlock()
+}
+
+func TestFindUserVoiceChannel(t *testing.T) {
+	// Test finding which voice channel a user is in
+	sessionManager := session.NewManager()
+	trans := &transcriber.MockTranscriber{}
+	audioProcessor := audio.NewProcessor(trans)
+	
+	bot, err := New("test-token", sessionManager, audioProcessor)
+	assert.NoError(t, err)
+	
+	// Initialize bot's Discord state
+	bot.discord.State.Ready.Guilds = []*discordgo.Guild{
+		{ID: "guild1"},
+		{ID: "guild2"},
+	}
+	
+	// Test 1: User not in any voice channel
+	guildID, channelID, err := bot.FindUserVoiceChannel("user-not-in-voice")
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "not in any voice channel")
+	assert.Empty(t, guildID)
+	assert.Empty(t, channelID)
+	
+	// Test 2: Add user to voice channel in guild1
+	bot.discord.State.Guilds[0].VoiceStates = []*discordgo.VoiceState{
+		{
+			UserID:    "user-in-voice",
+			ChannelID: "voice-channel-1",
+		},
+	}
+	
+	guildID, channelID, err = bot.FindUserVoiceChannel("user-in-voice")
+	assert.NoError(t, err)
+	assert.Equal(t, "guild1", guildID)
+	assert.Equal(t, "voice-channel-1", channelID)
+	
+	// Test 3: User in guild2
+	bot.discord.State.Guilds[1].VoiceStates = []*discordgo.VoiceState{
+		{
+			UserID:    "user-in-guild2",
+			ChannelID: "voice-channel-2",
+		},
+	}
+	
+	guildID, channelID, err = bot.FindUserVoiceChannel("user-in-guild2")
+	assert.NoError(t, err)
+	assert.Equal(t, "guild2", guildID)
+	assert.Equal(t, "voice-channel-2", channelID)
+	
+	// Test 4: User with empty channel ID (not actually in voice)
+	bot.discord.State.Guilds[0].VoiceStates = append(bot.discord.State.Guilds[0].VoiceStates, &discordgo.VoiceState{
+		UserID:    "user-no-channel",
+		ChannelID: "", // Empty channel ID means not in voice
+	})
+	
+	guildID, channelID, err = bot.FindUserVoiceChannel("user-no-channel")
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "not in any voice channel")
+}
+
+func TestJoinUserChannel(t *testing.T) {
+	// Test the logic for finding and joining a user's channel
+	// Note: We can't actually join without a valid Discord connection,
+	// so we'll focus on testing the FindUserVoiceChannel logic
+	sessionManager := session.NewManager()
+	trans := &transcriber.MockTranscriber{}
+	audioProcessor := audio.NewProcessor(trans)
+	
+	bot, err := New("test-token", sessionManager, audioProcessor)
+	assert.NoError(t, err)
+	
+	// Initialize bot's Discord state
+	bot.discord.State.Ready.Guilds = []*discordgo.Guild{
+		{
+			ID: "guild1",
+			VoiceStates: []*discordgo.VoiceState{
+				{
+					UserID:    "target-user",
+					ChannelID: "target-channel",
+				},
+			},
+		},
+	}
+	
+	// Test 1: User not in any channel
+	err = bot.JoinUserChannel("non-existent-user")
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "not in any voice channel")
+	
+	// Test 2: Test FindUserVoiceChannel directly for a user in voice
+	guildID, channelID, err := bot.FindUserVoiceChannel("target-user")
+	assert.NoError(t, err)
+	assert.Equal(t, "guild1", guildID)
+	assert.Equal(t, "target-channel", channelID)
+	
+	// Note: We can't test the actual join without a valid Discord connection
+	// as it would require mocking the Discord API
 }
