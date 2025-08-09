@@ -50,8 +50,15 @@ COPY --from=go-builder /app/discord-voice-mcp .
 
 # Copy whisper binaries from prebuilt image
 # The prebuilt image has binaries in /app/build/bin/
-COPY --from=whisper-source /app/build/bin/main /usr/local/bin/whisper
-COPY --from=whisper-source /app/build/bin/server /usr/local/bin/whisper-server
+COPY --from=whisper-source /app/build/bin/whisper-cli /usr/local/bin/whisper
+COPY --from=whisper-source /app/build/bin/whisper-server /usr/local/bin/whisper-server
+
+# Copy whisper shared libraries
+COPY --from=whisper-source /app/build/src/libwhisper.so* /usr/local/lib/
+COPY --from=whisper-source /app/build/ggml/src/libggml*.so* /usr/local/lib/
+
+# Update library cache
+RUN ldconfig
 
 # Create directories and add user
 RUN mkdir -p /models && \
