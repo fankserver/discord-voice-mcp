@@ -47,18 +47,21 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # Install ROCm headers for AMD GPU support (minimal, for compilation only)
 # Full ROCm is huge, so we just get what's needed for building
-# Note: ROCm may not be available on all architectures, so we handle this gracefully
-RUN apt-get update && apt-get install -y --no-install-recommends wget gnupg ca-certificates \
-    && mkdir -p /etc/apt/keyrings \
-    && (wget -qO - https://repo.radeon.com/rocm/rocm.gpg.key | \
-        gpg --dearmor -o /etc/apt/keyrings/rocm.gpg || true) \
-    && echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/rocm.gpg] https://repo.radeon.com/rocm/apt/debian/ ubuntu main" \
-        > /etc/apt/sources.list.d/rocm.list \
-    && apt-get update \
-    && (apt-get install -y --no-install-recommends rocm-dev || \
-        (echo "Warning: ROCm dev packages not available on this platform, AMD GPU support disabled" && \
-         rm -f /etc/apt/sources.list.d/rocm.list)) \
-    && rm -rf /var/lib/apt/lists/*
+# Note: ROCm is only available on x86_64 architecture
+RUN ARCH=$(dpkg --print-architecture) && \
+    if [ "$ARCH" = "amd64" ]; then \
+        apt-get update && apt-get install -y --no-install-recommends wget gnupg ca-certificates && \
+        mkdir -p /etc/apt/keyrings && \
+        wget -qO - https://repo.radeon.com/rocm/rocm.gpg.key | gpg --dearmor -o /etc/apt/keyrings/rocm.gpg && \
+        echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/rocm.gpg] https://repo.radeon.com/rocm/apt/debian/ ubuntu main" \
+            > /etc/apt/sources.list.d/rocm.list && \
+        apt-get update && \
+        (apt-get install -y --no-install-recommends rocm-dev || \
+            echo "Warning: ROCm dev packages not available, AMD GPU support disabled") && \
+        rm -rf /var/lib/apt/lists/*; \
+    else \
+        echo "Info: Skipping ROCm installation on $ARCH architecture"; \
+    fi
 
 # Clone whisper.cpp (separate layer for better caching)
 WORKDIR /build
@@ -67,13 +70,26 @@ RUN git clone --depth 1 --branch ${WHISPER_CPP_VERSION} https://github.com/ggerg
 # Build whisper.cpp with multiple acceleration backends
 # Will use first available at runtime: CUDA -> ROCm -> Vulkan -> OpenBLAS
 WORKDIR /build/whisper.cpp
-RUN cmake -B build \
+RUN ARCH=$(dpkg --print-architecture) && \
+    if [ "$ARCH" = "amd64" ]; then \
+        ROCM_FLAG="${GGML_ROCM}"; \
+        CUDA_ARCHS="60;61;70;75;80;86;89;90"; \
+    elif [ "$ARCH" = "arm64" ]; then \
+        ROCM_FLAG="OFF"; \
+        CUDA_ARCHS="53;62;72;87"; \
+        echo "Info: Disabling ROCm on $ARCH architecture, using ARM CUDA architectures"; \
+    else \
+        ROCM_FLAG="OFF"; \
+        CUDA_ARCHS="60;70;75;80"; \
+        echo "Info: Disabling ROCm on $ARCH architecture"; \
+    fi && \
+    cmake -B build \
         -DCMAKE_BUILD_TYPE=Release \
         -DGGML_CCACHE=OFF \
         -DGGML_OPENBLAS=${GGML_OPENBLAS} \
         -DGGML_CUDA=${GGML_CUDA} \
-        -DCMAKE_CUDA_ARCHITECTURES="60;61;70;75;80;86;89;90" \
-        -DGGML_ROCM=${GGML_ROCM} \
+        -DCMAKE_CUDA_ARCHITECTURES="${CUDA_ARCHS}" \
+        -DGGML_ROCM=${ROCM_FLAG} \
         -DGGML_SYCL=${GGML_SYCL} \
         -DGGML_VULKAN=${GGML_VULKAN} \
         . && \
@@ -99,9 +115,16 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libopenblas0 \
     libvulkan1 \
     mesa-vulkan-drivers \
-    && (apt-get install -y --no-install-recommends rocm-libs || \
-        echo "Info: ROCm runtime not available on this platform, AMD GPU support will be disabled") \
-    && rm -rf /var/lib/apt/lists/*
+    && rm -rf /var/lib/apt/lists/* && \
+    ARCH=$(dpkg --print-architecture) && \
+    if [ "$ARCH" = "amd64" ]; then \
+        apt-get update && \
+        (apt-get install -y --no-install-recommends rocm-libs || \
+            echo "Info: ROCm runtime not available, AMD GPU support will be disabled") && \
+        rm -rf /var/lib/apt/lists/*; \
+    else \
+        echo "Info: Skipping ROCm runtime on $ARCH architecture"; \
+    fi
 
 WORKDIR /app
 
