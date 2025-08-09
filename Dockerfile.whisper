@@ -8,7 +8,7 @@ ARG TARGETARCH
 
 # Install build dependencies
 # hadolint ignore=DL3018
-RUN apk add --no-cache git gcc musl-dev
+RUN apk add --no-cache git gcc musl-dev pkgconfig opus-dev
 
 WORKDIR /app
 

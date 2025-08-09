@@ -8,7 +8,7 @@ ARG TARGETARCH
 
 # Install build dependencies
 # hadolint ignore=DL3018
-RUN apk add --no-cache git gcc musl-dev
+RUN apk add --no-cache git gcc musl-dev pkgconfig opus-dev
 
 # Create non-root user
 RUN adduser -D -u 10001 appuser
