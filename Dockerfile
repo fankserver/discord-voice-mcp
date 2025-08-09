@@ -1,9 +1,9 @@
 # Build stage
 FROM golang:1.24-alpine3.21 AS builder
 
-# Build arguments for target platform
+# These are automatically set by Docker buildx based on the --platform flag
 ARG TARGETPLATFORM
-ARG TARGETOS
+ARG TARGETOS  
 ARG TARGETARCH
 
 # Install build dependencies
