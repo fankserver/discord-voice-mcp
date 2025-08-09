@@ -34,31 +34,27 @@ ARG GGML_SYCL=OFF
 ARG GGML_VULKAN=ON
 ARG GGML_OPENBLAS=ON
 
-# Install base build dependencies
+# Install build dependencies (combined for efficiency)
+# Includes base tools, OpenBLAS for CPU acceleration, and Vulkan SDK
 RUN apt-get update && apt-get install -y \
     git cmake make g++ pkg-config \
-    && rm -rf /var/lib/apt/lists/*
-
-# Install OpenBLAS for CPU acceleration (always included as fallback)
-RUN apt-get update && apt-get install -y \
     libopenblas-dev \
-    && rm -rf /var/lib/apt/lists/*
-
-# Install Vulkan SDK for cross-vendor GPU support
-RUN apt-get update && apt-get install -y \
     libvulkan-dev vulkan-tools \
     && rm -rf /var/lib/apt/lists/*
 
 # Install ROCm headers for AMD GPU support (minimal, for compilation only)
 # Full ROCm is huge, so we just get what's needed for building
-RUN apt-get update && apt-get install -y \
-    wget \
-    && wget -qO - https://repo.radeon.com/rocm/rocm.gpg.key | apt-key add - \
-    && echo "deb [arch=amd64] https://repo.radeon.com/rocm/apt/debian/ ubuntu main" > /etc/apt/sources.list.d/rocm.list \
+# Note: ROCm may not be available on all architectures, so we handle this gracefully
+RUN apt-get update && apt-get install -y wget gnupg ca-certificates \
+    && mkdir -p /etc/apt/keyrings \
+    && (wget -qO - https://repo.radeon.com/rocm/rocm.gpg.key | \
+        gpg --dearmor -o /etc/apt/keyrings/rocm.gpg || true) \
+    && echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/rocm.gpg] https://repo.radeon.com/rocm/apt/debian/ ubuntu main" \
+        > /etc/apt/sources.list.d/rocm.list \
     && apt-get update \
-    && apt-get install -y --no-install-recommends \
-    rocm-dev \
-    || echo "ROCm dev packages not available, continuing without AMD GPU build support" \
+    && (apt-get install -y --no-install-recommends rocm-dev || \
+        (echo "Warning: ROCm dev packages not available on this platform, AMD GPU support disabled" && \
+         rm -f /etc/apt/sources.list.d/rocm.list)) \
     && rm -rf /var/lib/apt/lists/*
 
 # Clone whisper.cpp (separate layer for better caching)
@@ -89,6 +85,7 @@ RUN cmake -B build \
 FROM nvidia/cuda:12.2.0-runtime-ubuntu22.04
 
 # Install runtime dependencies for all acceleration backends
+# Includes ffmpeg, audio libs, OpenBLAS, Vulkan, and optionally ROCm runtime
 RUN apt-get update && apt-get install -y \
     ffmpeg \
     libopus0 \
@@ -96,14 +93,8 @@ RUN apt-get update && apt-get install -y \
     libopenblas0 \
     libvulkan1 \
     mesa-vulkan-drivers \
-    && rm -rf /var/lib/apt/lists/*
-
-# Install AMD ROCm runtime libraries (small subset needed for runtime)
-# These are optional - if not available, AMD GPU support is disabled
-RUN apt-get update && \
-    apt-get install -y --no-install-recommends \
-    rocm-libs \
-    || echo "ROCm runtime not available, AMD GPU support will be disabled" \
+    && (apt-get install -y --no-install-recommends rocm-libs || \
+        echo "Info: ROCm runtime not available on this platform, AMD GPU support will be disabled") \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

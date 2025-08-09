@@ -7,7 +7,6 @@ import (
 	"os/exec"
 	"runtime"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/sirupsen/logrus"
@@ -47,53 +46,37 @@ func NewGPUWhisperTranscriber(modelPath string) (*GPUWhisperTranscriber, error) 
 		return nil, fmt.Errorf("ffmpeg executable not found in PATH: %w", err)
 	}
 
-	// Check GPU availability
+	// Check GPU configuration
+	// Let whisper.cpp auto-detect the best available backend (CUDA, ROCm, Vulkan, etc.)
 	useGPU := false
 	gpuLayers := 0
 	
-	// Check if GPU is requested via environment
-	if os.Getenv("WHISPER_USE_GPU") == "true" {
-		// Verify NVIDIA GPU is available
-		cmd := exec.Command("nvidia-smi", "--query-gpu=name", "--format=csv,noheader")
-		output, err := cmd.Output()
+	// Check if GPU is requested via environment (defaults to true for whisper image)
+	gpuEnv := os.Getenv("WHISPER_USE_GPU")
+	if gpuEnv == "" || gpuEnv == "true" {
+		useGPU = true
 		
-		if err == nil && len(output) > 0 {
-			useGPU = true
-			gpuName := strings.TrimSpace(string(output))
-			
-			// Get number of layers to offload to GPU
-			if layers := os.Getenv("WHISPER_GPU_LAYERS"); layers != "" {
-				if l, err := strconv.Atoi(layers); err == nil {
-					gpuLayers = l
-				} else {
-					gpuLayers = 32 // Default for most models
-				}
+		// Get number of layers to offload to GPU
+		if layers := os.Getenv("WHISPER_GPU_LAYERS"); layers != "" {
+			if l, err := strconv.Atoi(layers); err == nil {
+				gpuLayers = l
 			} else {
-				gpuLayers = 32 // Default
+				gpuLayers = 32 // Default for most models
 			}
-			
-			logrus.WithFields(logrus.Fields{
-				"gpu_name":   gpuName,
-				"gpu_layers": gpuLayers,
-			}).Info("GPU acceleration enabled for Whisper")
 		} else {
-			logrus.Warn("GPU requested but not available, falling back to CPU")
+			gpuLayers = 32 // Default
 		}
+		
+		logrus.WithFields(logrus.Fields{
+			"gpu_layers": gpuLayers,
+			"backend":    "auto-detect",
+		}).Info("GPU acceleration enabled - whisper.cpp will auto-detect backend")
+	} else {
+		logrus.Info("GPU acceleration disabled by configuration")
 	}
 
-	// Verify whisper binary has CUDA support if GPU is enabled
-	if useGPU {
-		// Check if whisper was built with CUDA support
-		cmd := exec.Command("ldd", whisperPath)
-		output, err := cmd.Output()
-		if err == nil {
-			outputStr := string(output)
-			if !strings.Contains(outputStr, "libcuda") && !strings.Contains(outputStr, "libcudart") {
-				logrus.Warn("Whisper binary does not appear to have CUDA support, GPU acceleration may not work")
-				// Don't disable GPU here, let whisper handle the fallback
-			}
-		}
-	}
+	// Note: We don't check for specific GPU libraries (CUDA, ROCm, etc.)
+	// whisper.cpp will automatically detect and use the best available backend
 
 	// Get language setting
 	language := os.Getenv("WHISPER_LANGUAGE")
@@ -208,12 +191,8 @@ func (wt *GPUWhisperTranscriber) Transcribe(audio []byte) (string, error) {
 	whisperCmd.Stdout = &outBuf
 	whisperCmd.Stderr = &errBuf
 
-	// Set CUDA environment if GPU is enabled
-	if wt.useGPU {
-		whisperCmd.Env = append(os.Environ(),
-			"CUDA_LAUNCH_BLOCKING=0", // Allow async GPU operations
-		)
-	}
+	// Let whisper.cpp handle GPU environment configuration
+	whisperCmd.Env = os.Environ()
 
 	logrus.WithField("gpu", wt.useGPU).Debug("GPUWhisperTranscriber: Starting whisper process")
 
@@ -252,28 +231,3 @@ func (wt *GPUWhisperTranscriber) Close() error {
 	return nil
 }
 
-// GetGPUInfo returns information about available GPUs
-func GetGPUInfo() ([]string, error) {
-	cmd := exec.Command("nvidia-smi", "--query-gpu=index,name,memory.total,memory.free,utilization.gpu", "--format=csv,noheader")
-	output, err := cmd.Output()
-	if err != nil {
-		return nil, fmt.Errorf("failed to query GPU info: %w", err)
-	}
-
-	lines := strings.Split(strings.TrimSpace(string(output)), "\n")
-	var gpuInfo []string
-	for _, line := range lines {
-		if line != "" {
-			gpuInfo = append(gpuInfo, line)
-		}
-	}
-	
-	return gpuInfo, nil
-}
-
-// IsGPUAvailable checks if GPU acceleration is available
-func IsGPUAvailable() bool {
-	cmd := exec.Command("nvidia-smi", "--query-gpu=name", "--format=csv,noheader")
-	err := cmd.Run()
-	return err == nil
-}
