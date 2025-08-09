@@ -43,7 +43,7 @@ RUN cmake -B build -DGGML_CCACHE=OFF . && \
 FROM alpine:3.20
 
 # Install runtime dependencies (including opus for dynamic linking)
-# hadolint ignore=DL3018  
+# hadolint ignore=DL3018
 RUN apk add --no-cache ffmpeg libstdc++ libgomp opus
 
 WORKDIR /app
