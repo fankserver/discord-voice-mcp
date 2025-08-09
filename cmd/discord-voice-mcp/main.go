@@ -19,30 +19,20 @@ import (
 )
 
 var (
-	Token     string
-	ChannelID string
-	GuildID   string
-	MCPMode   bool
+	Token  string
+	UserID string
 )
 
 func init() {
 	flag.StringVar(&Token, "token", "", "Discord Bot Token")
-	flag.StringVar(&ChannelID, "channel", "", "Voice Channel ID")
-	flag.StringVar(&GuildID, "guild", "", "Guild ID")
-	flag.BoolVar(&MCPMode, "mcp", false, "Run as MCP server")
 	flag.Parse()
 
-	// Load from environment if not provided
+	// Load from environment
+	_ = godotenv.Load()
 	if Token == "" {
-		_ = godotenv.Load()
 		Token = os.Getenv("DISCORD_TOKEN")
 	}
-	if ChannelID == "" {
-		ChannelID = os.Getenv("DISCORD_CHANNEL_ID")
-	}
-	if GuildID == "" {
-		GuildID = os.Getenv("DISCORD_GUILD_ID")
-	}
+	UserID = os.Getenv("DISCORD_USER_ID")
 }
 
 func main() {
@@ -91,16 +81,14 @@ func main() {
 	}
 	logrus.Info("Discord bot created successfully")
 
-	// Start MCP server if requested
-	if MCPMode {
-		mcpServer := mcp.NewServer(voiceBot, sessionManager)
-		go func() {
-			if err := mcpServer.Start(ctx); err != nil {
-				logrus.WithError(err).Error("MCP server error")
-			}
-		}()
-		logrus.Info("MCP server started")
-	}
+	// Always start MCP server - this is an MCP-first application
+	mcpServer := mcp.NewServer(voiceBot, sessionManager, UserID)
+	go func() {
+		if err := mcpServer.Start(ctx); err != nil {
+			logrus.WithError(err).Error("MCP server error")
+		}
+	}()
+	logrus.Info("MCP server started")
 
 	// Connect to Discord
 	err = voiceBot.Connect()
@@ -114,19 +102,9 @@ func main() {
 	}()
 	logrus.Info("Connected to Discord")
 
-	// Auto-join if channel provided
-	if ChannelID != "" && GuildID != "" {
-		logrus.WithFields(logrus.Fields{
-			"guild_id":   GuildID,
-			"channel_id": ChannelID,
-		}).Info("Auto-joining voice channel")
-
-		err = voiceBot.JoinChannel(GuildID, ChannelID)
-		if err != nil {
-			logrus.WithError(err).Error("Error joining channel")
-		} else {
-			logrus.Info("Successfully joined voice channel")
-		}
+	// Log user configuration if provided
+	if UserID != "" {
+		logrus.WithField("user_id", UserID).Info("Configured to follow user")
 	}
 
 	// Wait for context cancellation

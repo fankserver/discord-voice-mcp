@@ -1,44 +1,85 @@
 # Discord Voice MCP Server
 
-A high-performance Discord voice transcription server with MCP (Model Context Protocol) integration, written in Go for minimal resource usage.
+A pure MCP (Model Context Protocol) server for Discord voice channel transcription, written in Go. Control your Discord bot entirely through Claude Desktop or other MCP clients - no Discord commands needed.
 
-## 🎯 Performance
+## 📊 Specifications
 
-| Metric | Size/Performance |
-|--------|-----------------|
-| Docker Image (minimal) | **11 MB** |
-| Docker Image (with ffmpeg) | 199 MB |
-| Binary Size | 7.1 MB |
-| Memory Usage | ~10 MB |
-| Startup Time | <100ms |
-| Dependencies | 5 Go modules |
+| Component | Details |
+|-----------|---------|
+| Docker Image | **11 MB** (Alpine-based) |
+| Binary Size | ~12 MB |
+| Memory Usage | ~10-20 MB |
+| Language | Go 1.24 |
+| MCP SDK | v0.2.0 (official Go SDK) |
 
 ## 🚀 Quick Start
+
+### Prerequisites
+
+1. **Create a Discord Bot** at https://discord.com/developers/applications
+2. **Get your Discord User ID** (Enable Developer Mode in Discord settings → Right-click your username → Copy User ID)
+3. **Invite bot to your server** with the following permissions:
+
+### Required Discord Bot Permissions
+
+| Permission | Why It's Needed |
+|------------|----------------|
+| **View Channels** | See available voice channels |
+| **Connect** | Join voice channels |
+| **Speak** | Transmit audio in voice channels |
+| **Use Voice Activity** | Detect when users are speaking |
+
+Minimum permission integer: `3145728` (for OAuth2 URL generator)
+
+### Discord Bot Setup
+
+1. Go to [Discord Developer Portal](https://discord.com/developers/applications)
+2. Create a new application and bot
+3. Copy the bot token
+4. Generate an invite link:
+   - Go to OAuth2 → URL Generator
+   - Select scopes: `bot`
+   - Select permissions: `View Channels`, `Connect`, `Speak`, `Use Voice Activity`
+   - Or use this template URL (replace `YOUR_CLIENT_ID`):
+   ```
+   https://discord.com/api/oauth2/authorize?client_id=YOUR_CLIENT_ID&permissions=3145728&scope=bot
+   ```
 
 ### Run with Docker (Recommended)
 
 ```bash
-# Build the minimal image (11MB)
-docker build -f Dockerfile.minimal -t discord-voice-mcp:minimal .
+# Run the MCP server with your user ID
+docker run -i --rm \
+  -e DISCORD_TOKEN="your-bot-token" \
+  -e DISCORD_USER_ID="your-discord-user-id" \
+  ghcr.io/fankserver/discord-voice-mcp:latest
 
-# Or build with ffmpeg support (199MB)
-docker build -t discord-voice-mcp:go .
-
-# Run
-docker run -d \
-  -e DISCORD_TOKEN="your-token" \
-  -e DISCORD_CLIENT_ID="your-client-id" \
-  discord-voice-mcp:minimal
+# Or with auto-follow enabled by default
+docker run -i --rm \
+  -e DISCORD_TOKEN="your-bot-token" \
+  -e DISCORD_USER_ID="your-discord-user-id" \
+  -e AUTO_FOLLOW="true" \
+  ghcr.io/fankserver/discord-voice-mcp:latest
 ```
 
-### Run Native Binary
+### Configure Claude Desktop
 
-```bash
-# Build
-go build -o discord-voice-mcp ./cmd/discord-voice-mcp
+Add to your Claude Desktop config (`~/Library/Application Support/Claude/claude_desktop_config.json` on macOS):
 
-# Run
-DISCORD_TOKEN="your-token" ./discord-voice-mcp
+```json
+{
+  "mcpServers": {
+    "discord-voice": {
+      "command": "docker",
+      "args": [
+        "run", "-i", "--rm",
+        "-e", "DISCORD_TOKEN=your-bot-token",
+        "-e", "DISCORD_USER_ID=your-discord-user-id",
+        "ghcr.io/fankserver/discord-voice-mcp:latest"
+      ]
+    }
+  }
+}
 ```
 
 ### Cross-Compile for Any Platform
@@ -56,39 +97,41 @@ GOOS=linux GOARCH=arm64 go build -o discord-voice-mcp-arm
 
 ## 📦 Architecture
 
+This is a pure MCP server that connects to Discord. All control is through MCP tools - no Discord commands.
+
 ```
-main.go           - MCP server & Discord bot coordination
-audio.go          - Audio capture & transcription pipeline
-├── SessionManager    - Thread-safe transcript storage
-├── VoiceBot         - Discord voice channel handler
-├── AudioProcessor   - PCM audio processing
-└── Transcriber      - Provider interface (Whisper/Google/Mock)
+cmd/discord-voice-mcp/
+└── main.go              - Entry point, MCP server startup
+
+internal/
+├── mcp/
+│   └── server.go        - MCP tool implementations
+├── bot/
+│   └── bot.go           - Discord voice connection handler
+├── audio/
+│   └── processor.go     - Audio capture & processing
+├── session/
+│   └── manager.go       - Transcript session management
+└── transcriber/
+    └── interface.go     - Transcription provider interface
 ```
 
-## 🔄 Key Improvements
+### Key Design Principles
 
-### 1. Tiny Docker Images
-- **Alpine-based**: Minimal Linux distribution
-- **Static binary**: No runtime dependencies
-- **Multi-stage build**: Build artifacts not in final image
-- **Result**: 50MB total (vs 2.35GB)
+1. **MCP-First**: All control through MCP tools, no Discord text commands
+2. **User-Centric**: Tools work with "your channel" via DISCORD_USER_ID
+3. **Auto-Follow**: Bot can automatically follow you between channels
+4. **Stateless Commands**: Each MCP tool call is independent
+5. **Session-Based**: Transcripts organized by voice sessions
 
-### 2. Better Performance
-- **Goroutines**: Efficient concurrency for audio streams
-- **Channels**: Lock-free audio pipeline
-- **No GC pauses**: Minimal impact on real-time audio
-- **Native compilation**: Optimized machine code
+## 🔧 Technical Features
 
-### 3. Simple Deployment
-- **Single binary**: Just copy and run
-- **No npm/node_modules**: Zero JavaScript dependencies
-- **Cross-platform**: Build once, run anywhere
-- **Embedded resources**: Everything in one file
-
-### 4. Production Ready
-- **Structured logging**: Built-in log levels
-- **Graceful shutdown**: Clean resource cleanup with context cancellation
-- **Metrics**: Runtime profiling available
+- **Lightweight**: 11MB Docker image using Alpine Linux
+- **Fast Startup**: Sub-second initialization
+- **Cross-Platform**: Compile for Windows, macOS, Linux, ARM
+- **Concurrent**: Go's goroutines handle multiple audio streams efficiently
+- **Clean Shutdown**: Proper resource cleanup with context cancellation
+- **Structured Logging**: Configurable log levels for debugging
 
 ## 🛠️ Development
 
@@ -116,119 +159,110 @@ ls -lh discord-voice-mcp
 
 ### Environment Variables
 
-```env
-DISCORD_TOKEN=your_bot_token
-DISCORD_CLIENT_ID=your_client_id
-TRANSCRIPTION_PROVIDER=mock  # mock, whisper, google
-LOG_LEVEL=info
+| Variable | Required | Description | Example |
+|----------|----------|-------------|---------|  
+| `DISCORD_TOKEN` | ✅ | Bot token from Discord Developer Portal | `MTIz...` |
+| `DISCORD_USER_ID` | ✅ | Your Discord user ID for "my channel" commands | `123456789012345678` |
+| `LOG_LEVEL` | ❌ | Logging verbosity (default: `info`) | `debug`, `info`, `warn`, `error` |
+
+
+
+## 🔌 MCP Tools
+
+### Available Commands
+
+| Tool | Description | Parameters |
+|------|-------------|------------|
+| `join_my_voice_channel` | Join the voice channel where you are | None |
+| `follow_me` | Auto-follow you between voice channels | `enabled`: boolean |
+| `join_specific_channel` | Join a specific channel by ID | `guildId`, `channelId` |
+| `leave_voice_channel` | Leave current voice channel | None |
+| `get_bot_status` | Get bot connection status | None |
+| `list_sessions` | List all transcription sessions | None |
+| `get_transcript` | Get transcript for a session | `sessionId` |
+| `export_session` | Export session to JSON | `sessionId` |
+
+### Example Usage in Claude Desktop
+
 ```
+# Join your current voice channel
+"Use the join_my_voice_channel tool"
 
-## 🐳 Docker Comparison
+# Enable auto-follow so bot follows you
+"Enable follow_me to track my movements"
 
-### Node.js Dockerfile (2.35GB)
-```dockerfile
-FROM node:24-slim              # 240MB base
-RUN apt-get install...         # +1.76GB build tools
-RUN npm install                 # +333MB node_modules
-COPY whisper.cpp...             # +1MB binary
-# Total: 2.35GB
-```
+# Check bot status
+"What's the bot status?"
 
-### Go Dockerfile (50MB)
-```dockerfile
-FROM golang:1.23-alpine AS builder
-# Build stage only, not in final image
-
-FROM alpine:latest              # 5MB base
-RUN apk add ffmpeg             # +45MB
-COPY --from=builder binary    # +15MB
-# Total: ~50MB
-```
-
-## 📊 Benchmarks
-
-```bash
-# Startup time
-time docker run --rm discord-voice-mcp:go version
-# Go:     0.05s
-# Node.js: 3.2s
-
-# Memory usage (idle)
-docker stats discord-voice-mcp
-# Go:     10MB
-# Node.js: 187MB
-
-# Image size
-docker images | grep discord-voice-mcp
-# go       50MB
-# latest   2350MB
-```
-
-## 🔌 MCP Integration
-
-The Go version maintains full compatibility with Claude Desktop:
-
-```json
-{
-  "mcpServers": {
-    "discord-voice": {
-      "command": "/path/to/discord-voice-mcp",
-      "args": []
-    }
-  }
-}
+# Get transcripts
+"List all sessions and show me the latest transcript"
 ```
 
 ## 🎯 Use Cases
 
-Perfect for:
-- **Resource-constrained environments** (VPS, Raspberry Pi)
-- **Kubernetes deployments** (fast scaling, low overhead)
-- **CI/CD pipelines** (quick builds, small artifacts)
-- **Edge computing** (minimal footprint)
-- **Cost optimization** (less CPU/memory = lower cloud bills)
+### Personal Assistant
+- **Meeting Transcription** - Record Discord voice meetings
+- **Study Groups** - Capture study session discussions
+- **Gaming Sessions** - Document strategy discussions
+- **Podcast Recording** - Transcribe Discord podcasts
 
-## 🚧 Current Status
+### Technical Benefits
+- **Resource Efficiency** - Runs on Raspberry Pi or small VPS
+- **Fast Deployment** - 11MB images deploy instantly
+- **Cost Savings** - 95% less memory usage
+- **Cross-Platform** - Single binary for any OS
+- **Claude Integration** - Native MCP support
 
-This is a **proof of concept** demonstrating:
-- ✅ 98% smaller Docker images
-- ✅ Discord voice channel connection
-- ✅ MCP server structure
-- ✅ Session management
-- ✅ Audio capture pipeline
-- 🚧 Full transcription integration (in progress)
-- 🚧 Complete MCP protocol (using mark3labs/mcp-go)
+## ✅ Features
 
-## 🔮 Next Steps
+### Implemented
+- ✅ **Pure MCP Control** - No Discord text commands needed
+- ✅ **User-Centric Tools** - "Join my channel" functionality  
+- ✅ **Auto-Follow Mode** - Bot follows you automatically
+- ✅ **Minimal Docker Images** - Only 11MB
+- ✅ **Voice Connection** - Stable Discord voice handling
+- ✅ **Session Management** - Organized transcript storage
+- ✅ **Audio Pipeline** - Real-time PCM processing
+- ✅ **MCP SDK Integration** - Using official Go SDK v0.2.0
 
-1. Integrate whisper.cpp Go bindings for offline transcription
-2. Implement full MCP protocol with mark3labs/mcp-go
-3. Add Google Cloud Speech API support
-4. Create Kubernetes manifests for cloud deployment
-5. Build CLI with cobra for better UX
+### In Progress
+- 🚧 **Transcription** - Whisper/Google Speech integration
+- 🚧 **Real-time Updates** - Live transcript streaming
+- 🚧 **Multi-user Support** - Track multiple speakers
 
-## 📈 Why This Matters
+## 🔮 Roadmap
 
-- **Cost**: 95% less memory = cheaper cloud hosting
-- **Speed**: Instant startup = better user experience  
-- **Simplicity**: Single binary = easier deployment
-- **Reliability**: No dependency conflicts
-- **Portability**: Runs on any platform without installation
+### Phase 1: Transcription (Current)
+- [ ] Integrate whisper.cpp for offline transcription
+- [ ] Add Google Cloud Speech-to-Text
+- [ ] Implement real-time streaming transcripts
+
+### Phase 2: Enhanced Features
+- [ ] Speaker diarization (who said what)
+- [ ] Sentiment analysis
+- [ ] Keyword detection and alerts
+- [ ] Multi-language support
+
+### Phase 3: Scaling
+- [ ] Kubernetes deployment manifests
+- [ ] Multi-guild support
+- [ ] Webhook integrations
+- [ ] Transcript search API
+
 
 ## 🤝 Contributing
 
-The Go rewrite opens new possibilities:
-- Embedded systems support
-- Mobile app integration
-- Serverless functions
-- Edge computing
-
-PRs welcome for:
-- Transcription provider implementations
+Contributions are welcome! Areas of interest:
+- Transcription provider implementations (Whisper, Google Speech)
+- Additional MCP tools and features
 - Performance optimizations
-- Platform-specific builds
 - Documentation improvements
+
+Please ensure all tests pass before submitting PRs:
+```bash
+go test ./...
+```
 
 ## 📄 License
 
-MIT - Same as original
+MIT

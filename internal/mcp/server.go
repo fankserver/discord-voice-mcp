@@ -16,10 +16,11 @@ type Server struct {
 	mcpServer *mcp.Server
 	bot       *bot.VoiceBot
 	sessions  *session.Manager
+	userID    string // Configured user ID for "my channel" commands
 }
 
 // NewServer creates a new MCP server for Discord voice
-func NewServer(voiceBot *bot.VoiceBot, sessionManager *session.Manager) *Server {
+func NewServer(voiceBot *bot.VoiceBot, sessionManager *session.Manager, userID string) *Server {
 	impl := &mcp.Implementation{
 		Name:    "discord-voice-mcp",
 		Version: "0.1.0",
@@ -35,6 +36,7 @@ func NewServer(voiceBot *bot.VoiceBot, sessionManager *session.Manager) *Server 
 		mcpServer: mcpServer,
 		bot:       voiceBot,
 		sessions:  sessionManager,
+		userID:    userID,
 	}
 
 	// Register all tools
@@ -45,7 +47,36 @@ func NewServer(voiceBot *bot.VoiceBot, sessionManager *session.Manager) *Server 
 
 // registerTools registers all available MCP tools
 func (s *Server) registerTools() {
-	// Join voice channel tool
+	// Join my voice channel tool (user-centric)
+	joinMyChannelSchema := &jsonschema.Schema{
+		Type: "object",
+	}
+
+	mcp.AddTool[EmptyInput, JoinChannelOutput](s.mcpServer, &mcp.Tool{
+		Name:        "join_my_voice_channel",
+		Description: "Join the voice channel where the configured user is",
+		InputSchema: joinMyChannelSchema,
+	}, s.handleJoinMyVoiceChannel)
+
+	// Follow me tool
+	followMeSchema := &jsonschema.Schema{
+		Type: "object",
+		Properties: map[string]*jsonschema.Schema{
+			"enabled": {
+				Type:        "boolean",
+				Description: "Enable or disable auto-following",
+			},
+		},
+		Required: []string{"enabled"},
+	}
+
+	mcp.AddTool[FollowMeInput, FollowMeOutput](s.mcpServer, &mcp.Tool{
+		Name:        "follow_me",
+		Description: "Enable/disable auto-following the configured user between voice channels",
+		InputSchema: followMeSchema,
+	}, s.handleFollowMe)
+
+	// Join specific voice channel tool (kept for flexibility)
 	joinSchema := &jsonschema.Schema{
 		Type: "object",
 		Properties: map[string]*jsonschema.Schema{
@@ -62,8 +93,8 @@ func (s *Server) registerTools() {
 	}
 
 	mcp.AddTool[JoinChannelInput, JoinChannelOutput](s.mcpServer, &mcp.Tool{
-		Name:        "join_voice_channel",
-		Description: "Join a Discord voice channel",
+		Name:        "join_specific_channel",
+		Description: "Join a specific Discord voice channel by ID",
 		InputSchema: joinSchema,
 	}, s.handleJoinVoiceChannel)
 
@@ -254,20 +285,25 @@ func (s *Server) handleExportSession(ctx context.Context, sess *mcp.ServerSessio
 }
 
 type BotStatusOutput struct {
-	Connected bool   `json:"connected"`
-	InVoice   bool   `json:"inVoice"`
-	GuildID   string `json:"guildId,omitempty"`
-	ChannelID string `json:"channelId,omitempty"`
+	Connected     bool   `json:"connected"`
+	InVoice       bool   `json:"inVoice"`
+	GuildID       string `json:"guildId,omitempty"`
+	ChannelID     string `json:"channelId,omitempty"`
+	FollowingUser string `json:"followingUser,omitempty"`
+	AutoFollow    bool   `json:"autoFollow"`
 }
 
 func (s *Server) handleGetBotStatus(ctx context.Context, sess *mcp.ServerSession, params *mcp.CallToolParamsFor[EmptyInput]) (*mcp.CallToolResultFor[BotStatusOutput], error) {
 	logrus.Debug("MCP: Get bot status request")
 
 	status := s.bot.GetStatus()
+	followUser, autoFollow := s.bot.GetFollowStatus()
 
 	output := BotStatusOutput{
-		Connected: status["connected"].(bool),
-		InVoice:   status["inVoice"].(bool),
+		Connected:     status["connected"].(bool),
+		InVoice:       status["inVoice"].(bool),
+		FollowingUser: followUser,
+		AutoFollow:    autoFollow,
 	}
 
 	if guildID, ok := status["guildID"].(string); ok {
@@ -279,6 +315,83 @@ func (s *Server) handleGetBotStatus(ctx context.Context, sess *mcp.ServerSession
 
 	return &mcp.CallToolResultFor[BotStatusOutput]{
 		StructuredContent: output,
+	}, nil
+}
+
+// handleJoinMyVoiceChannel joins the voice channel where the configured user is
+func (s *Server) handleJoinMyVoiceChannel(ctx context.Context, session *mcp.ServerSession, params *mcp.CallToolParamsFor[EmptyInput]) (*mcp.CallToolResultFor[JoinChannelOutput], error) {
+	logrus.Debug("MCP: Join my voice channel request")
+
+	if s.userID == "" {
+		return &mcp.CallToolResultFor[JoinChannelOutput]{
+			StructuredContent: JoinChannelOutput{
+				Success: false,
+				Message: "No user ID configured. Set DISCORD_USER_ID environment variable",
+			},
+		}, nil
+	}
+
+	err := s.bot.JoinUserChannel(s.userID)
+
+	output := JoinChannelOutput{
+		Success: err == nil,
+		Message: "Successfully joined your voice channel",
+	}
+
+	if err != nil {
+		output.Message = fmt.Sprintf("Failed to join your channel: %v", err)
+	}
+
+	return &mcp.CallToolResultFor[JoinChannelOutput]{
+		StructuredContent: output,
+	}, nil
+}
+
+// FollowMeInput represents the input for the follow_me tool
+type FollowMeInput struct {
+	Enabled bool `json:"enabled"`
+}
+
+// FollowMeOutput represents the output for the follow_me tool
+type FollowMeOutput struct {
+	Success    bool   `json:"success"`
+	Message    string `json:"message"`
+	Following  bool   `json:"following"`
+	UserID     string `json:"userId,omitempty"`
+}
+
+// handleFollowMe enables or disables auto-following
+func (s *Server) handleFollowMe(ctx context.Context, session *mcp.ServerSession, params *mcp.CallToolParamsFor[FollowMeInput]) (*mcp.CallToolResultFor[FollowMeOutput], error) {
+	logrus.WithField("enabled", params.Arguments.Enabled).Debug("MCP: Follow me request")
+
+	if s.userID == "" {
+		return &mcp.CallToolResultFor[FollowMeOutput]{
+			StructuredContent: FollowMeOutput{
+				Success:   false,
+				Message:   "No user ID configured. Set DISCORD_USER_ID environment variable",
+				Following: false,
+			},
+		}, nil
+	}
+
+	s.bot.SetFollowUser(s.userID, params.Arguments.Enabled)
+
+	message := "Auto-follow disabled"
+	if params.Arguments.Enabled {
+		message = fmt.Sprintf("Now auto-following user %s", s.userID)
+		// Try to join their current channel if they're in one
+		if err := s.bot.JoinUserChannel(s.userID); err != nil {
+			logrus.WithError(err).Debug("User not currently in voice channel")
+		}
+	}
+
+	return &mcp.CallToolResultFor[FollowMeOutput]{
+		StructuredContent: FollowMeOutput{
+			Success:   true,
+			Message:   message,
+			Following: params.Arguments.Enabled,
+			UserID:    s.userID,
+		},
 	}, nil
 }
 

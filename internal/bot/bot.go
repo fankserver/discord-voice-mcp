@@ -16,6 +16,8 @@ type VoiceBot struct {
 	sessions       *session.Manager
 	audioProcessor *audio.Processor
 	voiceConn      *discordgo.VoiceConnection
+	followUserID   string // User ID to follow
+	autoFollow     bool   // Whether to auto-follow user
 	mu             sync.Mutex
 }
 
@@ -35,13 +37,10 @@ func New(token string, sessionManager *session.Manager, audioProcessor *audio.Pr
 	// Register handlers
 	discord.AddHandler(bot.ready)
 	discord.AddHandler(bot.voiceStateUpdate)
-	discord.AddHandler(bot.messageCreate)
 
-	// Set intents
+	// Set intents - only need guilds and voice states, no messages
 	discord.Identify.Intents = discordgo.IntentsGuilds |
-		discordgo.IntentsGuildVoiceStates |
-		discordgo.IntentsGuildMessages |
-		discordgo.IntentsMessageContent
+		discordgo.IntentsGuildVoiceStates
 
 	return bot, nil
 }
@@ -105,13 +104,66 @@ func (vb *VoiceBot) LeaveChannel() {
 	}
 }
 
+// FindUserVoiceChannel finds which voice channel a user is in
+func (vb *VoiceBot) FindUserVoiceChannel(userID string) (guildID, channelID string, err error) {
+	// Search across all guilds the bot is in
+	for _, guild := range vb.discord.State.Guilds {
+		for _, vs := range guild.VoiceStates {
+			if vs.UserID == userID && vs.ChannelID != "" {
+				return guild.ID, vs.ChannelID, nil
+			}
+		}
+	}
+	return "", "", fmt.Errorf("user %s is not in any voice channel", userID)
+}
+
+// JoinUserChannel joins the voice channel where the specified user is
+func (vb *VoiceBot) JoinUserChannel(userID string) error {
+	guildID, channelID, err := vb.FindUserVoiceChannel(userID)
+	if err != nil {
+		return err
+	}
+	
+	logrus.WithFields(logrus.Fields{
+		"user_id":    userID,
+		"guild_id":   guildID,
+		"channel_id": channelID,
+	}).Info("Joining user's voice channel")
+	
+	return vb.JoinChannel(guildID, channelID)
+}
+
+// SetFollowUser sets the user to follow and enables/disables auto-follow
+func (vb *VoiceBot) SetFollowUser(userID string, autoFollow bool) {
+	vb.mu.Lock()
+	defer vb.mu.Unlock()
+	
+	vb.followUserID = userID
+	vb.autoFollow = autoFollow
+	
+	logrus.WithFields(logrus.Fields{
+		"user_id":     userID,
+		"auto_follow": autoFollow,
+	}).Info("Follow settings updated")
+}
+
+// GetFollowStatus returns current follow settings
+func (vb *VoiceBot) GetFollowStatus() (userID string, autoFollow bool) {
+	vb.mu.Lock()
+	defer vb.mu.Unlock()
+	return vb.followUserID, vb.autoFollow
+}
+
 // GetStatus returns current bot status
 func (vb *VoiceBot) GetStatus() map[string]interface{} {
 	vb.mu.Lock()
 	defer vb.mu.Unlock()
 
+	// Check if state exists and has a session ID (indicates ready)
+	connected := vb.discord.State != nil && vb.discord.State.SessionID != ""
+	
 	status := map[string]interface{}{
-		"connected": vb.discord.State.Ready,
+		"connected": connected,
 		"inVoice":   vb.voiceConn != nil,
 	}
 
@@ -133,59 +185,41 @@ func (vb *VoiceBot) ready(s *discordgo.Session, event *discordgo.Ready) {
 }
 
 func (vb *VoiceBot) voiceStateUpdate(s *discordgo.Session, vsu *discordgo.VoiceStateUpdate) {
-	// Handle voice state updates if needed
+	// Handle bot's own voice state updates
 	if vsu.UserID == s.State.User.ID {
 		logrus.WithField("channel_id", vsu.ChannelID).Debug("Bot voice state updated")
-	}
-}
-
-func (vb *VoiceBot) messageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
-	// Ignore bot messages
-	if m.Author.ID == s.State.User.ID {
 		return
 	}
 
-	// Simple commands
-	switch m.Content {
-	case "!join":
-		// Get user's voice channel
-		g, err := s.State.Guild(m.GuildID)
-		if err != nil || g == nil {
+	// Handle followed user's voice state updates
+	vb.mu.Lock()
+	followUserID := vb.followUserID
+	autoFollow := vb.autoFollow
+	vb.mu.Unlock()
+
+	if followUserID != "" && vsu.UserID == followUserID && autoFollow {
+		if vsu.ChannelID == "" {
+			// User left voice channel
+			logrus.WithField("user_id", followUserID).Info("Followed user left voice, leaving channel")
+			vb.LeaveChannel()
+		} else {
+			// User joined or moved to a new channel
 			logrus.WithFields(logrus.Fields{
-				"guild_id": m.GuildID,
-				"error":    err,
-			}).Error("Could not find guild in state")
-			if _, err := s.ChannelMessageSend(m.ChannelID, "Error: Could not retrieve guild information."); err != nil {
-				logrus.WithError(err).Debug("Failed to send error message")
-			}
-			return
-		}
-		for _, vs := range g.VoiceStates {
-			if vs.UserID == m.Author.ID {
-				if err := vb.JoinChannel(m.GuildID, vs.ChannelID); err != nil {
-					logrus.WithError(err).Error("Failed to join voice channel")
+				"user_id":    followUserID,
+				"guild_id":   vsu.GuildID,
+				"channel_id": vsu.ChannelID,
+			}).Info("Followed user changed voice channel, following")
+			
+			// Only join if we're not already in that channel
+			vb.mu.Lock()
+			currentConn := vb.voiceConn
+			vb.mu.Unlock()
+			
+			if currentConn == nil || currentConn.ChannelID != vsu.ChannelID {
+				if err := vb.JoinChannel(vsu.GuildID, vsu.ChannelID); err != nil {
+					logrus.WithError(err).Error("Failed to follow user to new channel")
 				}
-				if _, err := s.ChannelMessageSend(m.ChannelID, "Joined voice channel!"); err != nil {
-					logrus.WithError(err).Debug("Failed to send join confirmation")
-				}
-				return
 			}
-		}
-		if _, err := s.ChannelMessageSend(m.ChannelID, "You need to be in a voice channel!"); err != nil {
-			logrus.WithError(err).Debug("Failed to send error message")
-		}
-
-	case "!leave":
-		vb.LeaveChannel()
-		if _, err := s.ChannelMessageSend(m.ChannelID, "Left voice channel!"); err != nil {
-			logrus.WithError(err).Debug("Failed to send leave confirmation")
-		}
-
-	case "!status":
-		status := vb.GetStatus()
-		msg := fmt.Sprintf("Status: Connected=%v, InVoice=%v", status["connected"], status["inVoice"])
-		if _, err := s.ChannelMessageSend(m.ChannelID, msg); err != nil {
-			logrus.WithError(err).Debug("Failed to send status message")
 		}
 	}
 }
