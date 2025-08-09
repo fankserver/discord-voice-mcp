@@ -27,7 +27,7 @@ jobs:
         include:
           - dockerfile: Dockerfile
             suffix: ""
-            platforms: linux/amd64
+            platforms: linux/amd64,linux/arm64
           # Minimal Dockerfile disabled - simplifying first
           # - dockerfile: Dockerfile.minimal
           #   suffix: "-minimal"

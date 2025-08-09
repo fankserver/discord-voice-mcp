@@ -1,6 +1,11 @@
 # Build stage
 FROM golang:1.24-alpine3.21 AS builder
 
+# Build arguments for target platform
+ARG TARGETPLATFORM
+ARG TARGETOS
+ARG TARGETARCH
+
 # Install build dependencies
 # hadolint ignore=DL3018
 RUN apk add --no-cache git gcc musl-dev pkgconfig opus-dev
@@ -14,16 +19,18 @@ RUN go mod download
 # Copy source code
 COPY . .
 
-# Build static binary with CGO (simple, for the build platform)
-RUN CGO_ENABLED=1 go build -a -tags netgo -ldflags '-w -s -extldflags "-static"' \
+# Build binary with CGO for the target platform
+# Using dynamic linking as static opus lib not available for all architectures
+RUN CGO_ENABLED=1 GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
+    go build -ldflags '-w -s' \
     -o discord-voice-mcp ./cmd/discord-voice-mcp
 
 # Final stage - using alpine for ffmpeg support
 FROM alpine:3.20
 
-# Install only ffmpeg (needed for audio processing)
+# Install ffmpeg and opus runtime libraries
 # hadolint ignore=DL3018
-RUN apk add --no-cache ffmpeg
+RUN apk add --no-cache ffmpeg opus
 
 WORKDIR /app
 
