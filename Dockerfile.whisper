@@ -39,6 +39,7 @@ ARG GGML_OPENBLAS=ON
 
 # Install build dependencies (combined for efficiency)
 # Includes base tools, OpenBLAS for CPU acceleration, and Vulkan SDK
+# hadolint ignore=DL3008
 RUN apt-get update && apt-get install -y --no-install-recommends \
     git cmake make g++ pkg-config \
     libopenblas-dev \
@@ -48,6 +49,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Install ROCm headers for AMD GPU support (minimal, for compilation only)
 # Full ROCm is huge, so we just get what's needed for building
 # Note: ROCm is only available on x86_64 architecture
+# hadolint ignore=DL3008,SC2086
 RUN ARCH=$(dpkg --print-architecture) && \
     if [ "$ARCH" = "amd64" ]; then \
         apt-get update && apt-get install -y --no-install-recommends wget gnupg ca-certificates && \
@@ -70,6 +72,7 @@ RUN git clone --depth 1 --branch ${WHISPER_CPP_VERSION} https://github.com/ggerg
 # Build whisper.cpp with multiple acceleration backends
 # Will use first available at runtime: CUDA -> ROCm -> Vulkan -> OpenBLAS
 WORKDIR /build/whisper.cpp
+# hadolint ignore=SC2086
 RUN ARCH=$(dpkg --print-architecture) && \
     if [ "$ARCH" = "amd64" ]; then \
         ROCM_FLAG="${GGML_ROCM}"; \
@@ -86,12 +89,12 @@ RUN ARCH=$(dpkg --print-architecture) && \
     cmake -B build \
         -DCMAKE_BUILD_TYPE=Release \
         -DGGML_CCACHE=OFF \
-        -DGGML_OPENBLAS=${GGML_OPENBLAS} \
-        -DGGML_CUDA=${GGML_CUDA} \
+        -DGGML_OPENBLAS="${GGML_OPENBLAS}" \
+        -DGGML_CUDA="${GGML_CUDA}" \
         -DCMAKE_CUDA_ARCHITECTURES="${CUDA_ARCHS}" \
-        -DGGML_ROCM=${ROCM_FLAG} \
-        -DGGML_SYCL=${GGML_SYCL} \
-        -DGGML_VULKAN=${GGML_VULKAN} \
+        -DGGML_ROCM="${ROCM_FLAG}" \
+        -DGGML_SYCL="${GGML_SYCL}" \
+        -DGGML_VULKAN="${GGML_VULKAN}" \
         . && \
     cmake --build build --config Release -- -j"$(nproc)" && \
     chmod +x build/bin/* && \
@@ -108,6 +111,7 @@ SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
 # Install runtime dependencies for all acceleration backends
 # Includes ffmpeg, audio libs, OpenBLAS, Vulkan, and optionally ROCm runtime
+# hadolint ignore=DL3008,SC2086
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
     libopus0 \
