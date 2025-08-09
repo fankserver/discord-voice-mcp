@@ -165,7 +165,7 @@ AUDIO_MIN_BUFFER_MS=100       # Minimum audio before transcription (default: 100
 |------------|------------|------------|-------|
 | Dockerfile.minimal | ~6MB | ~25MB | Scratch base, static binary |
 | Dockerfile | ~13MB | ~50MB | Alpine + ffmpeg |
-| Dockerfile.whisper | ~200MB | ~300MB | Includes whisper.cpp compilation |
+| Dockerfile.whisper | ~56MB | ~189MB | Includes whisper.cpp binaries |
 
 **Why ARM64 is larger:**
 - Static binary compilation eliminates most runtime dependencies

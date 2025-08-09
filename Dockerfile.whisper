@@ -1,9 +1,9 @@
 # Build stage for Go binary
 FROM golang:1.24-alpine3.20 AS go-builder
 
-# Install build dependencies
+# Install build dependencies (including opus for gopus)
 # hadolint ignore=DL3018
-RUN apk add --no-cache git gcc musl-dev
+RUN apk add --no-cache git gcc musl-dev pkgconfig opus-dev
 
 WORKDIR /app
 
@@ -14,9 +14,9 @@ RUN go mod download
 # Copy source code
 COPY . .
 
-# Build static binary with CGO
+# Build dynamic binary with CGO for opus support
 RUN CGO_ENABLED=1 \
-    go build -a -tags netgo -ldflags '-w -s -extldflags "-static"' \
+    go build -ldflags '-w -s' \
     -o discord-voice-mcp ./cmd/discord-voice-mcp
 
 # Build stage for whisper.cpp  
@@ -42,16 +42,16 @@ FROM alpine:3.20
 
 # Install runtime dependencies
 # hadolint ignore=DL3018  
-RUN apk add --no-cache ffmpeg libstdc++ libgomp
+RUN apk add --no-cache ffmpeg libstdc++ libgomp opus
 
 WORKDIR /app
 
 # Copy Go binary from builder
 COPY --from=go-builder /app/discord-voice-mcp .
 
-# Copy whisper binaries from builder (rename whisper-cli to whisper)
-COPY --from=whisper-builder /build/whisper.cpp/build/bin/whisper-cli /usr/local/bin/whisper
-COPY --from=whisper-builder /build/whisper.cpp/build/bin/whisper-server /usr/local/bin/whisper-server
+# Copy whisper binaries from builder (main is the CLI)
+COPY --from=whisper-builder /build/whisper.cpp/build/bin/main /usr/local/bin/whisper
+COPY --from=whisper-builder /build/whisper.cpp/build/bin/server /usr/local/bin/whisper-server
 # Copy whisper shared libraries from correct directories
 COPY --from=whisper-builder /build/whisper.cpp/build/src/libwhisper.so* /usr/local/lib/
 COPY --from=whisper-builder /build/whisper.cpp/build/ggml/src/libggml*.so* /usr/local/lib/
