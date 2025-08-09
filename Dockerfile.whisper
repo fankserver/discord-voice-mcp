@@ -22,13 +22,19 @@ RUN CGO_ENABLED=1 go build -ldflags '-w -s' \
 # Use prebuilt whisper.cpp image to extract binaries
 # This dramatically reduces build time from 2+ hours to minutes
 # Using 'main' tag which supports both linux/amd64 and linux/arm64
-# Note: CUDA support is not precompiled in the main image, but it includes
-# CPU optimizations (OpenBLAS) which still provide good performance
 FROM ghcr.io/ggml-org/whisper.cpp:main AS whisper-source
 
-# Final stage - using NVIDIA runtime as base for GPU support (if available)
-# This image will work with CPU-only as well (graceful fallback)
-FROM nvidia/cuda:12.2.0-runtime-ubuntu22.04
+# Architecture-specific base image selection
+# AMD64: Use NVIDIA CUDA runtime for GPU support (Windows/Linux with NVIDIA GPUs)
+# ARM64: Use standard Ubuntu for Apple Silicon Macs and ARM servers
+ARG TARGETARCH
+
+# Final stage with architecture-specific base
+FROM nvidia/cuda:12.2.0-runtime-ubuntu22.04 AS base-amd64
+FROM ubuntu:22.04 AS base-arm64
+
+# Select the appropriate base image based on architecture
+FROM base-${TARGETARCH} AS final
 
 # Set shell with pipefail for better error handling
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
@@ -69,17 +75,33 @@ USER mcp
 # Set default transcriber type for whisper image
 ENV TRANSCRIBER_TYPE=whisper
 
-# Note: This image uses CPU-optimized whisper.cpp (OpenBLAS)
-# For GPU acceleration, consider building from source with CUDA/ROCm support
+# Architecture-specific notes:
+# AMD64: Can use NVIDIA GPU acceleration if available (Windows/Linux)
+# ARM64: Optimized for CPU with ARM NEON instructions (Apple Silicon, ARM servers)
+# GPU acceleration in Docker on macOS is not effective due to virtualization limitations
 
 # Run the binary
 CMD ["./discord-voice-mcp"]
 
-# Usage:
-# docker run -i --rm \
-#   -e DISCORD_TOKEN="your-bot-token" \
-#   -e DISCORD_USER_ID="your-discord-user-id" \
-#   -e TRANSCRIBER_TYPE="whisper" \
-#   -e WHISPER_MODEL_PATH="/models/ggml-base.bin" \
-#   -v $(pwd)/models:/models:ro \
-#   ghcr.io/fankserver/discord-voice-mcp:whisper
+# Usage Examples:
+# 
+# Windows/Linux with NVIDIA GPU (amd64):
+#   docker run --gpus all -i --rm \
+#     -e DISCORD_TOKEN="your-bot-token" \
+#     -e DISCORD_USER_ID="your-discord-user-id" \
+#     -e TRANSCRIBER_TYPE="whisper" \
+#     -e WHISPER_MODEL_PATH="/models/ggml-base.bin" \
+#     -v $(pwd)/models:/models:ro \
+#     ghcr.io/fankserver/discord-voice-mcp:whisper
+#
+# macOS with Apple Silicon (arm64):
+#   docker run -i --rm \
+#     -e DISCORD_TOKEN="your-bot-token" \
+#     -e DISCORD_USER_ID="your-discord-user-id" \
+#     -e TRANSCRIBER_TYPE="whisper" \
+#     -e WHISPER_MODEL_PATH="/models/ggml-base.bin" \
+#     -v $(pwd)/models:/models:ro \
+#     ghcr.io/fankserver/discord-voice-mcp:whisper
+#
+# Note: For best performance on Apple Silicon Macs, consider running natively
+# instead of in Docker, as Metal GPU acceleration is not available in containers.
