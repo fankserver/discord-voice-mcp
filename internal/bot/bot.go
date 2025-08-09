@@ -258,7 +258,7 @@ func (vb *VoiceBot) voiceSpeakingUpdate(s *discordgo.Session, vsu *discordgo.Voi
 		if err != nil {
 			logrus.WithError(err).Warn("Failed to get user information")
 			// Fall back to using just the user ID
-			vb.ssrcToUser[vsu.SSRC] = &UserInfo{
+			vb.ssrcToUser[uint32(vsu.SSRC)] = &UserInfo{
 				UserID:   vsu.UserID,
 				Username: vsu.UserID,
 			}
@@ -274,7 +274,7 @@ func (vb *VoiceBot) voiceSpeakingUpdate(s *discordgo.Session, vsu *discordgo.Voi
 			}
 		}
 		
-		vb.ssrcToUser[vsu.SSRC] = &UserInfo{
+		vb.ssrcToUser[uint32(vsu.SSRC)] = &UserInfo{
 			UserID:   vsu.UserID,
 			Username: user.Username,
 			Nickname: nickname,
