@@ -1,11 +1,6 @@
 # Build stage
 FROM golang:1.24-alpine3.21 AS builder
 
-# These are automatically set by Docker buildx based on the --platform flag
-ARG TARGETPLATFORM
-ARG TARGETOS  
-ARG TARGETARCH
-
 # Install build dependencies
 # hadolint ignore=DL3018
 RUN apk add --no-cache git gcc musl-dev pkgconfig opus-dev
@@ -19,10 +14,10 @@ RUN go mod download
 # Copy source code
 COPY . .
 
-# Build binary with CGO for the target platform
+# Build binary with CGO
+# Docker buildx automatically handles cross-compilation via --platform flag
 # Using dynamic linking as static opus lib not available for all architectures
-RUN CGO_ENABLED=1 GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
-    go build -ldflags '-w -s' \
+RUN CGO_ENABLED=1 go build -ldflags '-w -s' \
     -o discord-voice-mcp ./cmd/discord-voice-mcp
 
 # Final stage - using alpine for ffmpeg support
