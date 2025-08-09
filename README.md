@@ -254,7 +254,7 @@ The audio processing behavior can be customized using environment variables:
 | `AUDIO_SILENCE_TIMEOUT_MS` | `1500` | Silence duration in milliseconds that triggers transcription |
 | `AUDIO_MIN_BUFFER_MS` | `100` | Minimum audio duration in milliseconds before transcription |
 | `WHISPER_LANGUAGE` | `auto` | Language code for Whisper transcription (e.g., "en", "de", "es", "auto") |
-| `WHISPER_THREADS` | `4` | Number of threads for Whisper processing (higher = faster but more CPU) |
+| `WHISPER_THREADS` | CPU cores | Number of threads for Whisper processing (defaults to runtime.NumCPU()) |
 | `WHISPER_BEAM_SIZE` | `1` | Beam size for Whisper (1 = fastest, 5 = most accurate) |
 
 ### Examples

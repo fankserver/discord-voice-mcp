@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"runtime"
+	"strconv"
 
 	"github.com/sirupsen/logrus"
 )
@@ -63,10 +65,10 @@ func NewWhisperTranscriber(modelPath string) (*WhisperTranscriber, error) {
 		language = "auto"  // Default to auto-detection to preserve original language
 	}
 	
-	// Get thread count (default: 4 for better performance/CPU balance)
+	// Get thread count (default: number of CPU cores for optimal performance)
 	threads := os.Getenv("WHISPER_THREADS")
 	if threads == "" {
-		threads = "4"
+		threads = strconv.Itoa(runtime.NumCPU())
 	}
 	
 	// Get beam size (default: 1 for faster processing, 5 for more accuracy)
