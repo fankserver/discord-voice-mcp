@@ -7,7 +7,7 @@ RUN apk add --no-cache git gcc musl-dev pkgconfig opus-dev
 
 WORKDIR /app
 
-# Copy go mod files
+# Copy go mod files first for better caching
 COPY go.mod go.sum ./
 RUN go mod download
 
@@ -19,15 +19,11 @@ COPY . .
 RUN CGO_ENABLED=1 go build -ldflags '-w -s' \
     -o discord-voice-mcp ./cmd/discord-voice-mcp
 
-# Architecture-specific whisper.cpp handling
-ARG TARGETARCH
-
-# For AMD64: Use prebuilt CUDA-enabled image from ghcr.io
-# This provides GPU acceleration with CUDA support
+# For AMD64: Use prebuilt CUDA-enabled image
 FROM ghcr.io/ggml-org/whisper.cpp:main-cuda AS whisper-amd64
 
-# For ARM64: Build from source since prebuilt doesn't support ARM64
-FROM ubuntu:22.04 AS whisper-arm64-builder
+# For ARM64: Build from source (only when targeting ARM64)
+FROM ubuntu:22.04 AS whisper-arm64
 
 # Install build dependencies for ARM64
 # hadolint ignore=DL3008
@@ -41,12 +37,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # Clone and build whisper.cpp for ARM64
 WORKDIR /build
-RUN git clone --depth 1 https://github.com/ggml-org/whisper.cpp.git
-
-WORKDIR /build/whisper.cpp
-# Build with ARM NEON optimizations
-# hadolint ignore=SC2046
-RUN cmake -B build \
+RUN git clone --depth 1 https://github.com/ggml-org/whisper.cpp.git && \
+    cd whisper.cpp && \
+    cmake -B build \
         -DCMAKE_BUILD_TYPE=Release \
         -DGGML_BLAS=ON \
         -DGGML_BLAS_VENDOR=OpenBLAS \
@@ -54,37 +47,25 @@ RUN cmake -B build \
         -DBUILD_SHARED_LIBS=ON && \
     cmake --build build --config Release -j"$(nproc)"
 
-# Create consistent output structure for ARM64
+# Create consistent structure matching AMD64 prebuilt
 RUN mkdir -p /app/build && \
-    cp -r build/* /app/build/
+    cp -r /build/whisper.cpp/build/* /app/build/
 
-# Dummy stage for ARM64 to match AMD64 structure
-FROM whisper-arm64-builder AS whisper-arm64
-
-# Select the correct whisper source based on architecture
+# Architecture selector
+ARG TARGETARCH
 # hadolint ignore=DL3006
 FROM whisper-${TARGETARCH} AS whisper-source
 
-# Architecture-specific base image selection
-# AMD64: Use minimal CUDA base for GPU support (Windows/Linux with NVIDIA GPUs)
-# ARM64: Use standard Ubuntu for Apple Silicon Macs and ARM servers
-ARG TARGETARCH
-
 # Final stage with architecture-specific base
-# Using cuda-base instead of cuda-runtime saves ~1.5GB
 FROM nvidia/cuda:12.2.0-base-ubuntu22.04 AS base-amd64
 FROM ubuntu:22.04 AS base-arm64
 
-# Select the appropriate base image based on architecture
+ARG TARGETARCH
 # hadolint ignore=DL3006
 FROM base-${TARGETARCH} AS final
 
-# Set shell with pipefail for better error handling
-SHELL ["/bin/bash", "-o", "pipefail", "-c"]
-
 # Install runtime dependencies
-# Only runtime libraries needed, not build tools
-# hadolint ignore=DL3008,DL3006
+# hadolint ignore=DL3008
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
     libopus0 \
@@ -97,11 +78,9 @@ WORKDIR /app
 # Copy Go binary from builder
 COPY --from=go-builder /app/discord-voice-mcp .
 
-# Copy whisper binaries from source (path is consistent at /app/build)
+# Copy whisper binaries from architecture-specific source
 COPY --from=whisper-source /app/build/bin/whisper-cli /usr/local/bin/whisper
 COPY --from=whisper-source /app/build/bin/whisper-server /usr/local/bin/whisper-server
-
-# Copy whisper shared libraries
 COPY --from=whisper-source /app/build/src/libwhisper.so* /usr/local/lib/
 COPY --from=whisper-source /app/build/ggml/src/libggml*.so* /usr/local/lib/
 
@@ -117,33 +96,5 @@ USER mcp
 # Set default transcriber type for whisper image
 ENV TRANSCRIBER_TYPE=whisper
 
-# Architecture-specific notes:
-# AMD64: Can use NVIDIA GPU acceleration if available (Windows/Linux)
-# ARM64: Optimized for CPU with ARM NEON instructions (Apple Silicon, ARM servers)
-# GPU acceleration in Docker on macOS is not effective due to virtualization limitations
-
 # Run the binary
 CMD ["./discord-voice-mcp"]
-
-# Usage Examples:
-# 
-# Windows/Linux with NVIDIA GPU (amd64):
-#   docker run --gpus all -i --rm \
-#     -e DISCORD_TOKEN="your-bot-token" \
-#     -e DISCORD_USER_ID="your-discord-user-id" \
-#     -e TRANSCRIBER_TYPE="whisper" \
-#     -e WHISPER_MODEL_PATH="/models/ggml-base.bin" \
-#     -v $(pwd)/models:/models:ro \
-#     ghcr.io/fankserver/discord-voice-mcp:whisper
-#
-# macOS with Apple Silicon (arm64):
-#   docker run -i --rm \
-#     -e DISCORD_TOKEN="your-bot-token" \
-#     -e DISCORD_USER_ID="your-discord-user-id" \
-#     -e TRANSCRIBER_TYPE="whisper" \
-#     -e WHISPER_MODEL_PATH="/models/ggml-base.bin" \
-#     -v $(pwd)/models:/models:ro \
-#     ghcr.io/fankserver/discord-voice-mcp:whisper
-#
-# Note: For best performance on Apple Silicon Macs, consider running natively
-# instead of in Docker, as Metal GPU acceleration is not available in containers.
