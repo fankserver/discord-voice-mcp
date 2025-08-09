@@ -26,6 +26,9 @@ updates:
         patterns:
           - "github.com/google/uuid"
           - "github.com/joho/godotenv"
+      testing:
+        patterns:
+          - "github.com/stretchr/testify"
       # MCP SDK kept separate due to experimental status
       # It will create individual PRs
 
