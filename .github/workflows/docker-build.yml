@@ -25,15 +25,15 @@ jobs:
     strategy:
       matrix:
         include:
-          # Main Dockerfile disabled - testing whisper build
-          # - dockerfile: Dockerfile
-          #   suffix: ""
-          #   platforms: linux/amd64,linux/arm64
-          # Minimal Dockerfile disabled - testing whisper build
-          # - dockerfile: Dockerfile.minimal
-          #   suffix: "-minimal"
-          #   platforms: linux/amd64
-          # Whisper Dockerfile - now with arm64 support
+          # Main Dockerfile with ffmpeg support
+          - dockerfile: Dockerfile
+            suffix: ""
+            platforms: linux/amd64,linux/arm64
+          # Minimal Dockerfile - amd64 only (static linking)
+          - dockerfile: Dockerfile.minimal
+            suffix: "-minimal"
+            platforms: linux/amd64
+          # Whisper Dockerfile with whisper.cpp
           - dockerfile: Dockerfile.whisper
             suffix: "-whisper"
             platforms: linux/amd64,linux/arm64

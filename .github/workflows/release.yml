@@ -40,6 +40,26 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
       
+      # Build and push main Docker image with ffmpeg
+      - name: Build and push main Docker image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.event.release.tag_name || github.event.inputs.tag }}
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+          labels: |
+            org.opencontainers.image.title=Discord Voice MCP
+            org.opencontainers.image.description=Discord voice transcription MCP server with ffmpeg support
+            org.opencontainers.image.version=${{ github.event.release.tag_name || github.event.inputs.tag }}
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      
       # Build and push minimal image (amd64 only - static linking not available for arm64)
       - name: Build and push minimal Docker image
         uses: docker/build-push-action@v6
@@ -60,22 +80,22 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
       
-      # Minimal build disabled - simplifying first
-      # - name: Build and push minimal Docker image
-      #   uses: docker/build-push-action@v6
-      #   with:
-      #     context: .
-      #     file: Dockerfile.minimal
-      #     platforms: linux/amd64,linux/arm64
-      #     push: true
-      #     tags: |
-      #       ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.event.release.tag_name || github.event.inputs.tag }}-minimal
-      #       ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:minimal
-      #     labels: |
-      #       org.opencontainers.image.title=Discord Voice MCP (Minimal)
-      #       org.opencontainers.image.description=Minimal Discord voice MCP without ffmpeg
-      #       org.opencontainers.image.version=${{ github.event.release.tag_name || github.event.inputs.tag }}
-      #       org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
-      #       org.opencontainers.image.revision=${{ github.sha }}
-      #     cache-from: type=gha
-      #     cache-to: type=gha,mode=max
+      # Build and push whisper image with local transcription
+      - name: Build and push whisper Docker image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.whisper
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.event.release.tag_name || github.event.inputs.tag }}-whisper
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:whisper
+          labels: |
+            org.opencontainers.image.title=Discord Voice MCP (Whisper)
+            org.opencontainers.image.description=Discord voice MCP with whisper.cpp for local transcription
+            org.opencontainers.image.version=${{ github.event.release.tag_name || github.event.inputs.tag }}
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
