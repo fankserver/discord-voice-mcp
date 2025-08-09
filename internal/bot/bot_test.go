@@ -1,11 +1,14 @@
 package bot
 
 import (
+	"fmt"
+	"sync"
 	"testing"
 
 	"github.com/fankserver/discord-voice-mcp/internal/audio"
 	"github.com/fankserver/discord-voice-mcp/internal/session"
 	"github.com/fankserver/discord-voice-mcp/pkg/transcriber"
+	"github.com/stretchr/testify/assert"
 )
 
 func TestNewBot(t *testing.T) {
@@ -86,4 +89,124 @@ func TestBotStatus(t *testing.T) {
 	if _, hasChannelID := status["channelID"]; hasChannelID {
 		t.Error("Should not have channelID when not in voice")
 	}
+}
+
+func TestGetUserBySSRC(t *testing.T) {
+	// Create a bot instance
+	sessionManager := session.NewManager()
+	trans := &transcriber.MockTranscriber{}
+	audioProcessor := audio.NewProcessor(trans)
+	
+	bot, err := New("test-token", sessionManager, audioProcessor)
+	assert.NoError(t, err)
+	assert.NotNil(t, bot)
+
+	// Test with no mappings - should return SSRC as fallback
+	ssrc := uint32(12345)
+	userID, username, nickname := bot.GetUserBySSRC(ssrc)
+	assert.Equal(t, "12345", userID)
+	assert.Equal(t, "12345", username)
+	assert.Equal(t, "12345", nickname)
+
+	// Add a user mapping
+	bot.ssrcToUser[ssrc] = &UserInfo{
+		UserID:   "user-123",
+		Username: "TestUser",
+		Nickname: "TestNick",
+	}
+
+	// Test with existing mapping
+	userID, username, nickname = bot.GetUserBySSRC(ssrc)
+	assert.Equal(t, "user-123", userID)
+	assert.Equal(t, "TestUser", username)
+	assert.Equal(t, "TestNick", nickname)
+
+	// Test with different SSRC - should return fallback
+	differentSSRC := uint32(67890)
+	userID, username, nickname = bot.GetUserBySSRC(differentSSRC)
+	assert.Equal(t, "67890", userID)
+	assert.Equal(t, "67890", username)
+	assert.Equal(t, "67890", nickname)
+}
+
+func TestSSRCMappingConcurrency(t *testing.T) {
+	// Test concurrent access to SSRC mappings
+	sessionManager := session.NewManager()
+	trans := &transcriber.MockTranscriber{}
+	audioProcessor := audio.NewProcessor(trans)
+	
+	bot, err := New("test-token", sessionManager, audioProcessor)
+	assert.NoError(t, err)
+
+	var wg sync.WaitGroup
+	numGoroutines := 10
+
+	// Concurrent writes
+	for i := 0; i < numGoroutines; i++ {
+		wg.Add(1)
+		go func(id int) {
+			defer wg.Done()
+			ssrc := uint32(1000 + id)
+			
+			// Simulate adding user mapping (normally done in voiceSpeakingUpdate)
+			bot.mu.Lock()
+			bot.ssrcToUser[ssrc] = &UserInfo{
+				UserID:   fmt.Sprintf("user-%d", id),
+				Username: fmt.Sprintf("User%d", id),
+				Nickname: fmt.Sprintf("Nick%d", id),
+			}
+			bot.mu.Unlock()
+		}(i)
+	}
+
+	// Concurrent reads
+	for i := 0; i < numGoroutines; i++ {
+		wg.Add(1)
+		go func(id int) {
+			defer wg.Done()
+			ssrc := uint32(1000 + id)
+			
+			// Read user info
+			userID, _, _ := bot.GetUserBySSRC(ssrc)
+			// May get fallback or actual value depending on timing
+			assert.NotEmpty(t, userID)
+		}(i)
+	}
+
+	wg.Wait()
+
+	// Verify all mappings were added
+	bot.mu.Lock()
+	assert.Len(t, bot.ssrcToUser, numGoroutines)
+	bot.mu.Unlock()
+}
+
+func TestLeaveChannelClearsSSRCMappings(t *testing.T) {
+	// Test that leaving a channel clears SSRC mappings
+	sessionManager := session.NewManager()
+	trans := &transcriber.MockTranscriber{}
+	audioProcessor := audio.NewProcessor(trans)
+	
+	bot, err := New("test-token", sessionManager, audioProcessor)
+	assert.NoError(t, err)
+
+	// Add some SSRC mappings
+	bot.mu.Lock()
+	bot.ssrcToUser[1001] = &UserInfo{UserID: "user1", Username: "User1", Nickname: "Nick1"}
+	bot.ssrcToUser[1002] = &UserInfo{UserID: "user2", Username: "User2", Nickname: "Nick2"}
+	bot.ssrcToUser[1003] = &UserInfo{UserID: "user3", Username: "User3", Nickname: "Nick3"}
+	bot.mu.Unlock()
+
+	// Verify mappings exist
+	bot.mu.Lock()
+	assert.Len(t, bot.ssrcToUser, 3)
+	bot.mu.Unlock()
+
+	// Leave channel (should clear mappings)
+	bot.LeaveChannel()
+
+	// Verify mappings were cleared
+	bot.mu.Lock()
+	assert.Empty(t, bot.ssrcToUser)
+	bot.mu.Unlock()
 }

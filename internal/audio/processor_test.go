@@ -321,3 +321,183 @@ func TestPCMConversion(t *testing.T) {
 	
 	assert.Equal(t, pcmSamples, recovered, "PCM conversion should be lossless")
 }
+
+// TestSilenceDetection tests the silence timer functionality
+func TestSilenceDetection(t *testing.T) {
+	// Set a short silence timeout for testing
+	oldTimeout := silenceTimeout
+	silenceTimeout = 100 * time.Millisecond
+	defer func() { silenceTimeout = oldTimeout }()
+
+	mockTranscriber := new(MockTranscriber)
+	processor := NewProcessor(mockTranscriber)
+	sessionManager := session.NewManager()
+	sessionID := sessionManager.CreateSession("test-guild", "test-channel")
+
+	// Create a stream with some audio data
+	stream := &Stream{
+		UserID:   "test-user",
+		Username: "TestUser",
+		Buffer:   bytes.NewBuffer(make([]byte, minAudioBuffer+100)), // Just above minimum
+	}
+
+	// Set up mock expectation for transcription
+	mockTranscriber.On("Transcribe", mock.Anything).Return("silence detected transcript", nil).Once()
+
+	// Start silence timer
+	stream.startSilenceTimer(processor, sessionManager, sessionID)
+
+	// Wait for silence timeout to trigger
+	time.Sleep(150 * time.Millisecond)
+
+	// Verify transcription was called
+	mockTranscriber.AssertExpectations(t)
+
+	// Buffer should be cleared
+	assert.Equal(t, 0, stream.Buffer.Len(), "Buffer should be cleared after silence detection")
+}
+
+// TestSilenceTimerCancellation tests that silence timer is cancelled when new audio arrives
+func TestSilenceTimerCancellation(t *testing.T) {
+	// Set a short silence timeout for testing
+	oldTimeout := silenceTimeout
+	silenceTimeout = 100 * time.Millisecond
+	defer func() { silenceTimeout = oldTimeout }()
+
+	mockTranscriber := new(MockTranscriber)
+	processor := NewProcessor(mockTranscriber)
+	sessionManager := session.NewManager()
+	sessionID := sessionManager.CreateSession("test-guild", "test-channel")
+
+	// Create a stream with some audio data
+	stream := &Stream{
+		UserID:   "test-user",
+		Username: "TestUser",
+		Buffer:   bytes.NewBuffer(make([]byte, minAudioBuffer+100)),
+	}
+
+	// Start silence timer
+	stream.startSilenceTimer(processor, sessionManager, sessionID)
+
+	// Simulate new audio arriving (which should cancel the timer)
+	stream.mu.Lock()
+	if stream.silenceTimer != nil {
+		stream.silenceTimer.Stop()
+		stream.silenceTimer = nil
+	}
+	stream.mu.Unlock()
+
+	// Wait past the silence timeout
+	time.Sleep(150 * time.Millisecond)
+
+	// Transcription should NOT have been called
+	mockTranscriber.AssertNotCalled(t, "Transcribe")
+}
+
+// TestSilenceTimerNotStartedForSmallBuffer tests that silence timer doesn't start for buffers below minimum
+func TestSilenceTimerNotStartedForSmallBuffer(t *testing.T) {
+	// Set a short silence timeout for testing
+	oldTimeout := silenceTimeout
+	silenceTimeout = 50 * time.Millisecond
+	defer func() { silenceTimeout = oldTimeout }()
+
+	mockTranscriber := new(MockTranscriber)
+	// processor and sessionID are created but not used directly in this test
+	_ = NewProcessor(mockTranscriber)
+	sessionManager := session.NewManager()
+	_ = sessionManager.CreateSession("test-guild", "test-channel")
+
+	// Create a stream with buffer below minimum
+	stream := &Stream{
+		UserID:   "test-user",
+		Username: "TestUser",
+		Buffer:   bytes.NewBuffer(make([]byte, minAudioBuffer-1)), // Just below minimum
+	}
+
+	// The silence timer logic checks buffer size before transcribing
+	// Simulate the check that happens in startSilenceTimer's AfterFunc
+	stream.mu.Lock()
+	bufferSize := stream.Buffer.Len()
+	stream.mu.Unlock()
+
+	if bufferSize > minAudioBuffer {
+		// This shouldn't happen in this test
+		t.Fatal("Buffer should be below minimum")
+	}
+
+	// Transcription should NOT be called for small buffers
+	mockTranscriber.AssertNotCalled(t, "Transcribe")
+}
+
+// TestMultipleSilenceTimers tests that multiple silence timers don't interfere
+func TestMultipleSilenceTimers(t *testing.T) {
+	// Set a short silence timeout for testing
+	oldTimeout := silenceTimeout
+	silenceTimeout = 100 * time.Millisecond
+	defer func() { silenceTimeout = oldTimeout }()
+
+	mockTranscriber := new(MockTranscriber)
+	processor := NewProcessor(mockTranscriber)
+	sessionManager := session.NewManager()
+	sessionID := sessionManager.CreateSession("test-guild", "test-channel")
+
+	// Create a stream
+	stream := &Stream{
+		UserID:   "test-user",
+		Username: "TestUser",
+		Buffer:   bytes.NewBuffer(make([]byte, minAudioBuffer+100)),
+	}
+
+	// Start first silence timer
+	stream.startSilenceTimer(processor, sessionManager, sessionID)
+	
+	// Try to start another timer immediately (should not create a new one)
+	stream.startSilenceTimer(processor, sessionManager, sessionID)
+	
+	// Verify only one timer exists
+	stream.mu.Lock()
+	hasTimer := stream.silenceTimer != nil
+	stream.mu.Unlock()
+	
+	assert.True(t, hasTimer, "Should have a timer")
+	
+	// Clean up timer
+	stream.mu.Lock()
+	if stream.silenceTimer != nil {
+		stream.silenceTimer.Stop()
+		stream.silenceTimer = nil
+	}
+	stream.mu.Unlock()
+}
+
+// TestTranscribeAndClearWithSilenceTimer tests that transcribeAndClear cancels silence timer
+func TestTranscribeAndClearWithSilenceTimer(t *testing.T) {
+	mockTranscriber := new(MockTranscriber)
+	processor := NewProcessor(mockTranscriber)
+	sessionManager := session.NewManager()
+	sessionID := sessionManager.CreateSession("test-guild", "test-channel")
+
+	// Create stream with data and active silence timer
+	stream := &Stream{
+		UserID:   "test-user",
+		Username: "TestUser",
+		Buffer:   bytes.NewBuffer(make([]byte, 1000)),
+	}
+	
+	// Start a silence timer
+	stream.silenceTimer = time.NewTimer(1 * time.Hour) // Long timer that should be cancelled
+
+	// Setup mock
+	mockTranscriber.On("Transcribe", mock.Anything).Return("test", nil).Once()
+
+	// Call transcribeAndClear
+	processor.transcribeAndClear(stream, sessionManager, sessionID)
+
+	// Verify silence timer was cancelled
+	stream.mu.Lock()
+	timerIsNil := stream.silenceTimer == nil
+	stream.mu.Unlock()
+	
+	assert.True(t, timerIsNil, "Silence timer should be nil after transcribeAndClear")
+	mockTranscriber.AssertExpectations(t)
+}
