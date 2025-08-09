@@ -3,6 +3,12 @@ name: Release
 on:
   release:
     types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to release (e.g., v0.1.0)'
+        required: true
+        type: string
 
 env:
   REGISTRY: ghcr.io
@@ -50,14 +56,14 @@ jobs:
           platforms: linux/amd64,linux/arm64
           push: true
           tags: |
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.event.release.tag_name }}
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.event.release.tag_name || github.event.inputs.tag }}
             ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
-            ${{ secrets.DOCKERHUB_USERNAME != '' && format('docker.io/{0}/discord-voice-mcp:{1}', secrets.DOCKERHUB_USERNAME, github.event.release.tag_name) || '' }}
+            ${{ secrets.DOCKERHUB_USERNAME != '' && format('docker.io/{0}/discord-voice-mcp:{1}', secrets.DOCKERHUB_USERNAME, github.event.release.tag_name || github.event.inputs.tag) || '' }}
             ${{ secrets.DOCKERHUB_USERNAME != '' && format('docker.io/{0}/discord-voice-mcp:latest', secrets.DOCKERHUB_USERNAME) || '' }}
           labels: |
             org.opencontainers.image.title=Discord Voice MCP
             org.opencontainers.image.description=Discord voice channel transcription with MCP integration
-            org.opencontainers.image.version=${{ github.event.release.tag_name }}
+            org.opencontainers.image.version=${{ github.event.release.tag_name || github.event.inputs.tag }}
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
             org.opencontainers.image.revision=${{ github.sha }}
           cache-from: type=gha
@@ -79,7 +85,7 @@ jobs:
           labels: |
             org.opencontainers.image.title=Discord Voice MCP (Minimal)
             org.opencontainers.image.description=Minimal Discord voice MCP without ffmpeg
-            org.opencontainers.image.version=${{ github.event.release.tag_name }}
+            org.opencontainers.image.version=${{ github.event.release.tag_name || github.event.inputs.tag }}
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
             org.opencontainers.image.revision=${{ github.sha }}
           cache-from: type=gha
@@ -135,11 +141,11 @@ jobs:
           
           if [ "${{ matrix.goos }}" = "linux" ]; then
             go build -a -tags netgo \
-              -ldflags "-w -s -extldflags '-static' -X main.Version=${{ github.event.release.tag_name }}" \
+              -ldflags "-w -s -extldflags '-static' -X main.Version=${{ github.event.release.tag_name || github.event.inputs.tag }}" \
               -o "${output_name}" ./cmd/discord-voice-mcp
           else
             go build \
-              -ldflags "-w -s -X main.Version=${{ github.event.release.tag_name }}" \
+              -ldflags "-w -s -X main.Version=${{ github.event.release.tag_name || github.event.inputs.tag }}" \
               -o "${output_name}" ./cmd/discord-voice-mcp
           fi
           
