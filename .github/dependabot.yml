@@ -1,0 +1,61 @@
+version: 2
+updates:
+  # Enable version updates for Go modules
+  - package-ecosystem: "gomod"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 10
+    reviewers:
+      - "fankserver"
+    labels:
+      - "dependencies"
+      - "go"
+    commit-message:
+      prefix: "chore"
+      include: "scope"
+    groups:
+      discord:
+        patterns:
+          - "github.com/bwmarrin/discordgo"
+          - "layeh.com/gopus"
+      logging:
+        patterns:
+          - "github.com/sirupsen/logrus"
+      utilities:
+        patterns:
+          - "github.com/google/uuid"
+          - "github.com/joho/godotenv"
+      testing:
+        patterns:
+          - "github.com/stretchr/testify"
+      # MCP SDK kept separate due to experimental status
+      # It will create individual PRs
+
+  # Enable version updates for Docker
+  - package-ecosystem: "docker"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    reviewers:
+      - "fankserver"
+    labels:
+      - "dependencies"
+      - "docker"
+    commit-message:
+      prefix: "chore"
+      include: "scope"
+
+  # Enable version updates for GitHub Actions
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    reviewers:
+      - "fankserver"
+    labels:
+      - "dependencies"
+      - "github-actions"
+    commit-message:
+      prefix: "chore"
+      include: "scope"
