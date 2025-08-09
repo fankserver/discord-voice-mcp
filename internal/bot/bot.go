@@ -10,6 +10,13 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
+// UserInfo stores user information for transcription
+type UserInfo struct {
+	UserID   string
+	Username string
+	Nickname string // Server-specific nickname if available
+}
+
 // VoiceBot manages Discord voice connections
 type VoiceBot struct {
 	discord        *discordgo.Session
@@ -18,6 +25,7 @@ type VoiceBot struct {
 	voiceConn      *discordgo.VoiceConnection
 	followUserID   string // User ID to follow
 	autoFollow     bool   // Whether to auto-follow user
+	ssrcToUser     map[uint32]*UserInfo // Maps SSRC to user information
 	mu             sync.Mutex
 }
 
@@ -32,11 +40,13 @@ func New(token string, sessionManager *session.Manager, audioProcessor *audio.Pr
 		discord:        discord,
 		sessions:       sessionManager,
 		audioProcessor: audioProcessor,
+		ssrcToUser:     make(map[uint32]*UserInfo),
 	}
 
 	// Register handlers
 	discord.AddHandler(bot.ready)
 	discord.AddHandler(bot.voiceStateUpdate)
+	discord.AddHandler(bot.voiceSpeakingUpdate)
 
 	// Set intents - only need guilds and voice states, no messages
 	discord.Identify.Intents = discordgo.IntentsGuilds |
@@ -93,8 +103,8 @@ func (vb *VoiceBot) JoinChannel(guildID, channelID string) error {
 		"channel_id": channelID,
 	}).Info("Started voice session")
 
-	// Start processing voice
-	go vb.audioProcessor.ProcessVoiceReceive(vc, vb.sessions, sessionID)
+	// Start processing voice (pass bot as UserResolver)
+	go vb.audioProcessor.ProcessVoiceReceive(vc, vb.sessions, sessionID, vb)
 
 	return nil
 }
@@ -109,6 +119,10 @@ func (vb *VoiceBot) LeaveChannel() {
 			logrus.WithError(err).Debug("Error disconnecting from voice channel")
 		}
 		vb.voiceConn = nil
+		
+		// Clear SSRC mappings when leaving channel
+		vb.ssrcToUser = make(map[uint32]*UserInfo)
+		
 		logrus.Info("Left voice channel")
 	}
 }
@@ -231,4 +245,60 @@ func (vb *VoiceBot) voiceStateUpdate(s *discordgo.Session, vsu *discordgo.VoiceS
 			}
 		}
 	}
+}
+
+func (vb *VoiceBot) voiceSpeakingUpdate(s *discordgo.Session, vsu *discordgo.VoiceSpeakingUpdate) {
+	// Map SSRC to user when they start speaking
+	if vsu.Speaking {
+		vb.mu.Lock()
+		defer vb.mu.Unlock()
+		
+		// Get user information
+		user, err := s.User(vsu.UserID)
+		if err != nil {
+			logrus.WithError(err).Warn("Failed to get user information")
+			// Fall back to using just the user ID
+			vb.ssrcToUser[vsu.SSRC] = &UserInfo{
+				UserID:   vsu.UserID,
+				Username: vsu.UserID,
+			}
+			return
+		}
+		
+		// Get nickname if in a guild
+		nickname := user.Username
+		if vb.voiceConn != nil && vb.voiceConn.GuildID != "" {
+			member, err := s.GuildMember(vb.voiceConn.GuildID, vsu.UserID)
+			if err == nil && member.Nick != "" {
+				nickname = member.Nick
+			}
+		}
+		
+		vb.ssrcToUser[vsu.SSRC] = &UserInfo{
+			UserID:   vsu.UserID,
+			Username: user.Username,
+			Nickname: nickname,
+		}
+		
+		logrus.WithFields(logrus.Fields{
+			"ssrc":     vsu.SSRC,
+			"user_id":  vsu.UserID,
+			"username": user.Username,
+			"nickname": nickname,
+		}).Debug("Mapped SSRC to user")
+	}
+}
+
+// GetUserBySSRC returns user information for a given SSRC (implements UserResolver)
+func (vb *VoiceBot) GetUserBySSRC(ssrc uint32) (userID, username, nickname string) {
+	vb.mu.Lock()
+	defer vb.mu.Unlock()
+	
+	if info, exists := vb.ssrcToUser[ssrc]; exists {
+		return info.UserID, info.Username, info.Nickname
+	}
+	
+	// Return SSRC as fallback if not found
+	ssrcStr := fmt.Sprintf("%d", ssrc)
+	return ssrcStr, ssrcStr, ssrcStr
 }

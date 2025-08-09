@@ -16,6 +16,11 @@ import (
 	"layeh.com/gopus"
 )
 
+// UserResolver interface for resolving SSRC to user information
+type UserResolver interface {
+	GetUserBySSRC(ssrc uint32) (userID, username, nickname string)
+}
+
 const (
 	// Audio configuration (these are fixed by Discord)
 	sampleRate = 48000
@@ -108,7 +113,7 @@ func NewProcessor(t transcriber.Transcriber) *Processor {
 }
 
 // ProcessVoiceReceive handles incoming voice packets
-func (p *Processor) ProcessVoiceReceive(vc *discordgo.VoiceConnection, sessionManager *session.Manager, activeSessionID string) {
+func (p *Processor) ProcessVoiceReceive(vc *discordgo.VoiceConnection, sessionManager *session.Manager, activeSessionID string, userResolver UserResolver) {
 	// Create opus decoder
 	decoder, err := gopus.NewDecoder(sampleRate, channels)
 	if err != nil {
@@ -136,8 +141,9 @@ func (p *Processor) ProcessVoiceReceive(vc *discordgo.VoiceConnection, sessionMa
 			"is_silence": isSilence,
 		}).Debug("Received voice packet")
 		
-		// Get or create stream for user (using SSRC as ID)
-		stream := p.getOrCreateStream(packet.SSRC, fmt.Sprintf("%d", packet.SSRC), sessionManager, activeSessionID)
+		// Get or create stream for user
+		userID, username, nickname := userResolver.GetUserBySSRC(packet.SSRC)
+		stream := p.getOrCreateStream(packet.SSRC, userID, username, nickname, sessionManager, activeSessionID)
 
 		// Handle silence packets
 		if isSilence {
@@ -206,12 +212,14 @@ func (p *Processor) ProcessVoiceReceive(vc *discordgo.VoiceConnection, sessionMa
 	logrus.Info("Voice receive channel closed")
 }
 
-func (p *Processor) getOrCreateStream(ssrc uint32, userID string, sessionManager *session.Manager, sessionID string) *Stream {
+func (p *Processor) getOrCreateStream(ssrc uint32, userID, username, nickname string, sessionManager *session.Manager, sessionID string) *Stream {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
 	streamID := fmt.Sprintf("%d", ssrc)
 	if stream, exists := p.activeStreams[streamID]; exists {
+		// Update username/nickname in case they changed
+		stream.Username = nickname // Use nickname as display name
 		logrus.WithFields(logrus.Fields{
 			"ssrc":   ssrc,
 			"stream_id": streamID,
@@ -221,7 +229,7 @@ func (p *Processor) getOrCreateStream(ssrc uint32, userID string, sessionManager
 
 	stream := &Stream{
 		UserID:   userID,
-		Username: userID, // In production, resolve username
+		Username: nickname, // Use nickname as display name
 		Buffer:   new(bytes.Buffer),
 		lastAudioTime: time.Now(),
 	}
@@ -230,6 +238,8 @@ func (p *Processor) getOrCreateStream(ssrc uint32, userID string, sessionManager
 		"ssrc":      ssrc,
 		"stream_id": streamID,
 		"user_id":   userID,
+		"username":  username,
+		"nickname":  nickname,
 	}).Info("Created new audio stream")
 	return stream
 }

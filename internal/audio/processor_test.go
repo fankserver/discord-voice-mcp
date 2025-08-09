@@ -182,7 +182,8 @@ func TestProcessorConcurrentAccess(t *testing.T) {
 			
 			// Create/get stream
 			ssrc := uint32(id)
-			stream := processor.getOrCreateStream(ssrc, fmt.Sprintf("user-%d", id))
+			userID := fmt.Sprintf("user-%d", id)
+			stream := processor.getOrCreateStream(ssrc, userID, userID, userID, nil, "")
 			
 			// Add data to buffer
 			data := make([]byte, 1000)
@@ -205,20 +206,22 @@ func TestGetOrCreateStream(t *testing.T) {
 	// First call should create a new stream
 	ssrc := uint32(12345)
 	userID := "user-123"
-	stream1 := processor.getOrCreateStream(ssrc, userID)
+	username := "TestUser"
+	nickname := "TestNick"
+	stream1 := processor.getOrCreateStream(ssrc, userID, username, nickname, nil, "")
 	
 	assert.NotNil(t, stream1)
 	assert.Equal(t, userID, stream1.UserID)
-	assert.Equal(t, userID, stream1.Username)
+	assert.Equal(t, nickname, stream1.Username) // Username field stores nickname
 	assert.NotNil(t, stream1.Buffer)
 	
 	// Second call with same SSRC should return the same stream
-	stream2 := processor.getOrCreateStream(ssrc, userID)
+	stream2 := processor.getOrCreateStream(ssrc, userID, username, nickname, nil, "")
 	assert.Equal(t, stream1, stream2, "Should return the same stream instance")
 	
 	// Different SSRC should create a new stream
 	differentSSRC := uint32(67890)
-	stream3 := processor.getOrCreateStream(differentSSRC, "different-user")
+	stream3 := processor.getOrCreateStream(differentSSRC, "different-user", "DifferentUser", "DiffNick", nil, "")
 	assert.NotEqual(t, stream1, stream3, "Should create a different stream for different SSRC")
 }
 
