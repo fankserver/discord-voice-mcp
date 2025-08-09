@@ -25,18 +25,18 @@ jobs:
     strategy:
       matrix:
         include:
-          # Main Dockerfile disabled - testing minimal build
+          # Main Dockerfile disabled - testing whisper build
           # - dockerfile: Dockerfile
           #   suffix: ""
           #   platforms: linux/amd64,linux/arm64
-          # Minimal Dockerfile - amd64 only (static linking not available for arm64)
-          - dockerfile: Dockerfile.minimal
-            suffix: "-minimal"
+          # Minimal Dockerfile disabled - testing whisper build
+          # - dockerfile: Dockerfile.minimal
+          #   suffix: "-minimal"
+          #   platforms: linux/amd64
+          # Whisper Dockerfile - starting with amd64 only
+          - dockerfile: Dockerfile.whisper
+            suffix: "-whisper"
             platforms: linux/amd64
-          # Whisper Dockerfile disabled - experimental and requires fixes
-          # - dockerfile: Dockerfile.whisper
-          #   suffix: "-whisper"
-          #   platforms: linux/amd64,linux/arm64
     
     steps:
       - name: Checkout repository
