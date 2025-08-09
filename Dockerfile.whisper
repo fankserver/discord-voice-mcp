@@ -19,100 +19,12 @@ COPY . .
 RUN CGO_ENABLED=1 go build -ldflags '-w -s' \
     -o discord-voice-mcp ./cmd/discord-voice-mcp
 
-# Build stage for whisper.cpp with multiple acceleration backends
-# Using NVIDIA CUDA base image to support CUDA compilation
-FROM nvidia/cuda:12.2.0-devel-ubuntu22.04 AS whisper-builder
-
-# Set shell with pipefail for better error handling
-SHELL ["/bin/bash", "-o", "pipefail", "-c"]
-
-# Pin to a specific version for reproducible builds
-ARG WHISPER_CPP_VERSION=v1.7.3
-
-# Build args for GPU support (can be overridden at build time)
-# Default: Build with CUDA, ROCm, Vulkan, and OpenBLAS for maximum compatibility
-# For faster CI builds, you can set GGML_CUDA=OFF
-ARG GGML_CUDA=ON
-ARG GGML_ROCM=ON
-ARG GGML_SYCL=OFF
-ARG GGML_VULKAN=ON
-ARG GGML_OPENBLAS=ON
-
-# Install build dependencies (combined for efficiency)
-# Includes base tools, OpenBLAS for CPU acceleration, and Vulkan SDK
-# hadolint ignore=DL3008
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    git cmake make g++ pkg-config \
-    libopenblas-dev \
-    libvulkan-dev vulkan-tools \
-    && rm -rf /var/lib/apt/lists/*
-
-# Install ROCm headers for AMD GPU support (minimal, for compilation only)
-# Full ROCm is huge, so we just get what's needed for building
-# Note: ROCm is only available on x86_64 architecture
-# hadolint ignore=DL3008,SC2086
-RUN ARCH=$(dpkg --print-architecture) && \
-    if [ "$ARCH" = "amd64" ]; then \
-        echo "Info: Attempting to install ROCm for AMD GPU support on amd64" && \
-        apt-get update && \
-        apt-get install -y --no-install-recommends wget gnupg ca-certificates && \
-        mkdir -p /etc/apt/keyrings && \
-        (wget -qO - https://repo.radeon.com/rocm/rocm.gpg.key | gpg --dearmor -o /etc/apt/keyrings/rocm.gpg || \
-            echo "Warning: Failed to fetch ROCm GPG key") && \
-        if [ -f /etc/apt/keyrings/rocm.gpg ]; then \
-            echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/rocm.gpg] https://repo.radeon.com/rocm/apt/debian/ ubuntu main" \
-                > /etc/apt/sources.list.d/rocm.list && \
-            apt-get update || true && \
-            (apt-get install -y --no-install-recommends rocm-dev 2>/dev/null || \
-                echo "Info: ROCm dev packages not available, continuing without AMD GPU support"); \
-        else \
-            echo "Info: Skipping ROCm repository setup due to missing GPG key"; \
-        fi && \
-        rm -rf /var/lib/apt/lists/*; \
-    else \
-        echo "Info: Skipping ROCm installation on $ARCH architecture"; \
-    fi
-
-# Clone whisper.cpp (separate layer for better caching)
-WORKDIR /build
-RUN git clone --depth 1 --branch ${WHISPER_CPP_VERSION} https://github.com/ggerganov/whisper.cpp.git
-
-# Build whisper.cpp with multiple acceleration backends
-# Will use first available at runtime: CUDA -> ROCm -> Vulkan -> OpenBLAS
-WORKDIR /build/whisper.cpp
-# hadolint ignore=SC2086
-RUN ARCH=$(dpkg --print-architecture) && \
-    if [ "$ARCH" = "amd64" ]; then \
-        ROCM_FLAG="${GGML_ROCM}"; \
-        # Consumer GPUs only: RTX 2000-5000 series
-        # 75=RTX 2000 (Turing), 86=RTX 3000 (Ampere), 89=RTX 4000 (Ada), 90=RTX 5000 (Blackwell)
-        CUDA_ARCHS="75;86;89;90"; \
-        echo "Info: Building for consumer CUDA architectures: ${CUDA_ARCHS} (RTX 2000/3000/4000/5000)"; \
-    elif [ "$ARCH" = "arm64" ]; then \
-        ROCM_FLAG="OFF"; \
-        # Jetson: 87=Orin (most recent)
-        CUDA_ARCHS="87"; \
-        echo "Info: Disabling ROCm on $ARCH, using Jetson Orin architecture: ${CUDA_ARCHS}"; \
-    else \
-        ROCM_FLAG="OFF"; \
-        CUDA_ARCHS="86"; \
-        echo "Info: Disabling ROCm on $ARCH architecture, using single arch"; \
-    fi && \
-    cmake -B build \
-        -DCMAKE_BUILD_TYPE=Release \
-        -DGGML_CCACHE=OFF \
-        -DGGML_OPENBLAS="${GGML_OPENBLAS}" \
-        -DGGML_CUDA="${GGML_CUDA}" \
-        -DCMAKE_CUDA_ARCHITECTURES="${CUDA_ARCHS}" \
-        -DGGML_ROCM="${ROCM_FLAG}" \
-        -DGGML_SYCL="${GGML_SYCL}" \
-        -DGGML_VULKAN="${GGML_VULKAN}" \
-        . && \
-    cmake --build build --config Release -- -j"$(nproc)" && \
-    chmod +x build/bin/* && \
-    # Show which acceleration backends were built
-    echo "Built with acceleration support:" && \
-    ldd build/bin/main | grep -E "cuda|hip|vulkan|blas" || echo "Checking acceleration..."
+# Use prebuilt whisper.cpp CUDA image to extract binaries
+# This dramatically reduces build time from 2+ hours to minutes
+# The ghcr.io/ggml-org/whisper.cpp:main-cuda image includes:
+# - whisper-cli with CUDA, ROCm, Vulkan, and OpenBLAS support
+# - ffmpeg and other required tools
+FROM ghcr.io/ggml-org/whisper.cpp:main-cuda AS whisper-source
 
 # Final stage - using NVIDIA runtime as base for GPU support
 # This image will work with CPU-only as well (graceful fallback)
@@ -121,9 +33,9 @@ FROM nvidia/cuda:12.2.0-runtime-ubuntu22.04
 # Set shell with pipefail for better error handling
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
-# Install runtime dependencies for all acceleration backends
-# Includes ffmpeg, audio libs, OpenBLAS, Vulkan, and optionally ROCm runtime
-# hadolint ignore=DL3008,SC2086
+# Install runtime dependencies
+# Only runtime libraries needed, not build tools
+# hadolint ignore=DL3008
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
     libopus0 \
@@ -131,11 +43,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libopenblas0 \
     libvulkan1 \
     mesa-vulkan-drivers \
-    && rm -rf /var/lib/apt/lists/* && \
-    ARCH=$(dpkg --print-architecture) && \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install ROCm runtime for AMD GPU support (optional, only on amd64)
+# hadolint ignore=DL3008,SC2086
+RUN ARCH=$(dpkg --print-architecture) && \
     if [ "$ARCH" = "amd64" ]; then \
         apt-get update && \
-        (apt-get install -y --no-install-recommends rocm-libs || \
+        (apt-get install -y --no-install-recommends rocm-libs 2>/dev/null || \
             echo "Info: ROCm runtime not available, AMD GPU support will be disabled") && \
         rm -rf /var/lib/apt/lists/*; \
     else \
@@ -147,16 +62,16 @@ WORKDIR /app
 # Copy Go binary from builder
 COPY --from=go-builder /app/discord-voice-mcp .
 
-# Copy whisper binaries from builder  
-COPY --from=whisper-builder /build/whisper.cpp/build/bin/main /usr/local/bin/whisper
-COPY --from=whisper-builder /build/whisper.cpp/build/bin/server /usr/local/bin/whisper-server
-# Copy whisper shared libraries from correct directories
-COPY --from=whisper-builder /build/whisper.cpp/build/src/libwhisper.so* /usr/local/lib/
-COPY --from=whisper-builder /build/whisper.cpp/build/ggml/src/libggml*.so* /usr/local/lib/
-# Update library cache, create directories, and add user
-RUN ldconfig && \
-    mkdir -p /models && \
+# Copy whisper binaries from prebuilt image
+# The prebuilt image has whisper-cli in /app
+COPY --from=whisper-source /app/whisper-cli /usr/local/bin/whisper
+# Some versions might have whisper-server, copy if exists
+COPY --from=whisper-source /app/whisper-server /usr/local/bin/whisper-server 2>/dev/null || true
+
+# Create directories and add user
+RUN mkdir -p /models && \
     useradd -m -u 1000 -s /bin/bash mcp
+
 USER mcp
 
 # Set default transcriber type for whisper image
