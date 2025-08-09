@@ -35,8 +35,7 @@ RUN git clone --depth 1 --branch ${WHISPER_CPP_VERSION} https://github.com/ggerg
 
 # Build whisper.cpp (this layer only rebuilds if source changes)
 WORKDIR /build/whisper.cpp
-RUN --mount=type=cache,target=/build/whisper.cpp/build,id=whisper-build-$TARGETPLATFORM \
-    cmake -B build -DGGML_CCACHE=OFF . && \
+RUN cmake -B build -DGGML_CCACHE=OFF . && \
     cmake --build build --config Release -- -j$(nproc) && \
     ls -la build/bin/ && \
     chmod +x build/bin/*
