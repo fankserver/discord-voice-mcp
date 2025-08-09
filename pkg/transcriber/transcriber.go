@@ -3,6 +3,7 @@ package transcriber
 import (
 	"bytes"
 	"fmt"
+	"os"
 	"os/exec"
 
 	"github.com/sirupsen/logrus"
@@ -16,43 +17,139 @@ type Transcriber interface {
 
 // WhisperTranscriber uses whisper.cpp for transcription
 type WhisperTranscriber struct {
-	modelPath string
+	modelPath    string
+	whisperPath  string
+	ffmpegPath   string
 }
 
 // NewWhisperTranscriber creates a whisper.cpp based transcriber
-func NewWhisperTranscriber(modelPath string) *WhisperTranscriber {
-	return &WhisperTranscriber{
-		modelPath: modelPath,
+func NewWhisperTranscriber(modelPath string) (*WhisperTranscriber, error) {
+	// Validate model file exists
+	if _, err := os.Stat(modelPath); err != nil {
+		if os.IsNotExist(err) {
+			return nil, fmt.Errorf("whisper model file not found: %s", modelPath)
+		}
+		return nil, fmt.Errorf("whisper model file not accessible: %w", err)
 	}
+	
+	// Check for whisper executable and validate it works
+	whisperPath, err := exec.LookPath("whisper")
+	if err != nil {
+		return nil, fmt.Errorf("whisper executable not found in PATH: %w", err)
+	}
+	
+	// Validate whisper binary works
+	if err := exec.Command(whisperPath, "--help").Run(); err != nil {
+		return nil, fmt.Errorf("whisper executable found but not working: %w", err)
+	}
+	
+	// Check for ffmpeg executable and validate it works
+	ffmpegPath, err := exec.LookPath("ffmpeg")
+	if err != nil {
+		return nil, fmt.Errorf("ffmpeg executable not found in PATH: %w", err)
+	}
+	
+	// Validate ffmpeg binary works
+	if err := exec.Command(ffmpegPath, "-version").Run(); err != nil {
+		return nil, fmt.Errorf("ffmpeg executable found but not working: %w", err)
+	}
+	
+	logrus.WithFields(logrus.Fields{
+		"whisper": whisperPath,
+		"ffmpeg":  ffmpegPath,
+		"model":   modelPath,
+	}).Info("Whisper transcriber initialized successfully")
+	
+	return &WhisperTranscriber{
+		modelPath:   modelPath,
+		whisperPath: whisperPath,
+		ffmpegPath:  ffmpegPath,
+	}, nil
 }
 
 // Transcribe uses whisper.cpp CLI for transcription
 func (wt *WhisperTranscriber) Transcribe(audio []byte) (string, error) {
-	// For proof of concept, we'll use exec to call whisper CLI
-	// In production, use Go bindings
-
-	// Create temporary WAV file
-	cmd := exec.Command("ffmpeg", "-f", "s16le", "-ar", "48000", "-ac", "2", "-i", "-", "-f", "wav", "-")
+	logrus.WithFields(logrus.Fields{
+		"audio_bytes": len(audio),
+		"model":       wt.modelPath,
+	}).Debug("WhisperTranscriber: Starting transcription")
+	
+	// Convert PCM to WAV format using ffmpeg
+	// Input: 48kHz, 2 channel, 16-bit signed PCM
+	cmd := exec.Command(wt.ffmpegPath, 
+		"-f", "s16le",      // Input format: signed 16-bit little-endian
+		"-ar", "48000",     // Sample rate: 48kHz
+		"-ac", "2",         // Channels: 2 (stereo)
+		"-i", "-",          // Input from stdin
+		"-ar", "16000",     // Resample to 16kHz for Whisper
+		"-ac", "1",         // Convert to mono for Whisper
+		"-f", "wav",        // Output format: WAV
+		"-",                // Output to stdout
+	)
 	cmd.Stdin = bytes.NewReader(audio)
-
-	wavData, err := cmd.Output()
-	if err != nil {
-		return "", fmt.Errorf("ffmpeg error: %w", err)
+	
+	var wavBuf bytes.Buffer
+	var ffmpegErr bytes.Buffer
+	cmd.Stdout = &wavBuf
+	cmd.Stderr = &ffmpegErr
+	
+	if err := cmd.Run(); err != nil {
+		logrus.WithFields(logrus.Fields{
+			"error":  err,
+			"stderr": ffmpegErr.String(),
+		}).Error("Failed to convert audio to WAV")
+		return "", fmt.Errorf("audio conversion failed: %w", err)
 	}
+	
+	logrus.WithField("wav_bytes", wavBuf.Len()).Debug("WhisperTranscriber: Audio converted to WAV")
 
-	// Call whisper (simplified for PoC)
+	// Call whisper for transcription
+	// Using more specific parameters for better transcription
 	// #nosec G204 - modelPath is controlled by server configuration, not user input
-	whisperCmd := exec.Command("whisper", "-m", wt.modelPath, "-")
-	whisperCmd.Stdin = bytes.NewReader(wavData)
+	whisperCmd := exec.Command(wt.whisperPath,
+		"-m", wt.modelPath,     // Model path
+		"-l", "en",             // Language: English
+		"-t", "8",              // Threads
+		"--no-timestamps",      // Don't include timestamps in output
+		"-otxt",                // Output format: plain text
+		"-",                    // Read from stdin
+	)
+	whisperCmd.Stdin = &wavBuf
+	
+	var outBuf, errBuf bytes.Buffer
+	whisperCmd.Stdout = &outBuf
+	whisperCmd.Stderr = &errBuf
 
-	output, err := whisperCmd.Output()
-	if err != nil {
-		logrus.WithError(err).Warn("Whisper command failed")
-		// Return error to allow caller to handle appropriately
+	logrus.Debug("WhisperTranscriber: Starting whisper process")
+	
+	if err := whisperCmd.Run(); err != nil {
+		logrus.WithFields(logrus.Fields{
+			"error":  err,
+			"stderr": errBuf.String(),
+		}).Error("Whisper transcription failed")
 		return "", fmt.Errorf("whisper transcription failed: %w", err)
 	}
 
-	return string(output), nil
+	// Clean up the output (remove extra whitespace)
+	transcript := string(bytes.TrimSpace(outBuf.Bytes()))
+	if transcript == "" {
+		logrus.Debug("WhisperTranscriber: No speech detected")
+		return "[No speech detected]", nil
+	}
+	
+	logrus.WithFields(logrus.Fields{
+		"transcript_length": len(transcript),
+		"first_50_chars":    transcript[:min(50, len(transcript))],
+	}).Debug("WhisperTranscriber: Transcription complete")
+	
+	return transcript, nil
+}
+
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }
 
 func (wt *WhisperTranscriber) Close() error {
@@ -64,8 +161,8 @@ type GoogleTranscriber struct {
 	// In production, add Google Cloud client
 }
 
-func NewGoogleTranscriber() *GoogleTranscriber {
-	return &GoogleTranscriber{}
+func NewGoogleTranscriber() (*GoogleTranscriber, error) {
+	return &GoogleTranscriber{}, nil
 }
 
 func (gt *GoogleTranscriber) Transcribe(audio []byte) (string, error) {
@@ -81,6 +178,7 @@ func (gt *GoogleTranscriber) Close() error {
 type MockTranscriber struct{}
 
 func (mt *MockTranscriber) Transcribe(audio []byte) (string, error) {
+	logrus.WithField("audio_bytes", len(audio)).Debug("MockTranscriber: Generating mock transcript")
 	return fmt.Sprintf("[Mock transcript: %d bytes of audio]", len(audio)), nil
 }
 

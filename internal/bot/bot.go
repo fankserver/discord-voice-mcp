@@ -68,11 +68,20 @@ func (vb *VoiceBot) JoinChannel(guildID, channelID string) error {
 		}
 	}
 
-	// Join new channel
-	vc, err := vb.discord.ChannelVoiceJoin(guildID, channelID, false, false)
+	// Join new channel - muted but NOT deafened to receive voice
+	vc, err := vb.discord.ChannelVoiceJoin(guildID, channelID, true, false)
 	if err != nil {
 		return fmt.Errorf("error joining voice channel: %w", err)
 	}
+	
+	// Enable voice receive
+	vc.Speaking(false)
+	
+	logrus.WithFields(logrus.Fields{
+		"guild_id":   guildID,
+		"channel_id": channelID,
+		"receiving":  true,
+	}).Debug("Voice connection established")
 
 	vb.voiceConn = vc
 

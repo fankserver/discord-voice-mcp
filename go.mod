@@ -12,8 +12,17 @@ require (
 )
 
 require (
+	github.com/davecgh/go-spew v1.1.1 // indirect
+	github.com/djthorpe/go-errors v1.0.3 // indirect
 	github.com/gorilla/websocket v1.5.3 // indirect
+	github.com/mutablelogic/go-media v1.7.5 // indirect
+	github.com/mutablelogic/go-whisper v0.0.25 // indirect
+	github.com/pmezard/go-difflib v1.0.0 // indirect
+	github.com/stretchr/objx v0.5.2 // indirect
+	github.com/stretchr/testify v1.10.0 // indirect
 	github.com/yosida95/uritemplate/v3 v3.0.2 // indirect
-	golang.org/x/crypto v0.35.0 // indirect
-	golang.org/x/sys v0.30.0 // indirect
+	golang.org/x/crypto v0.39.0 // indirect
+	golang.org/x/exp v0.0.0-20250606033433-dcc06ee1d476 // indirect
+	golang.org/x/sys v0.33.0 // indirect
+	gopkg.in/yaml.v3 v3.0.1 // indirect
 )

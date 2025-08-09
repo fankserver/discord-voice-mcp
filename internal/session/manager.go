@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/sirupsen/logrus"
 )
 
 // Manager handles transcription sessions
@@ -56,6 +57,13 @@ func (m *Manager) CreateSession(guildID, channelID string) string {
 	}
 
 	m.sessions[session.ID] = session
+	
+	logrus.WithFields(logrus.Fields{
+		"session_id": session.ID,
+		"guild_id":   guildID,
+		"channel_id": channelID,
+	}).Debug("Session created")
+	
 	return session.ID
 }
 
@@ -66,6 +74,7 @@ func (m *Manager) AddTranscript(sessionID, userID, username, text string) error 
 
 	session, exists := m.sessions[sessionID]
 	if !exists {
+		logrus.WithField("session_id", sessionID).Error("Session not found for transcript")
 		return fmt.Errorf("session %s not found", sessionID)
 	}
 
@@ -77,6 +86,15 @@ func (m *Manager) AddTranscript(sessionID, userID, username, text string) error 
 	}
 
 	session.Transcripts = append(session.Transcripts, transcript)
+	
+	logrus.WithFields(logrus.Fields{
+		"session_id":       sessionID,
+		"user_id":          userID,
+		"username":         username,
+		"text_length":      len(text),
+		"total_transcripts": len(session.Transcripts),
+	}).Debug("Transcript added to session")
+	
 	return nil
 }
 

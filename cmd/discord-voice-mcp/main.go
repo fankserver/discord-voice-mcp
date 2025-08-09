@@ -19,12 +19,16 @@ import (
 )
 
 var (
-	Token  string
-	UserID string
+	Token           string
+	UserID          string
+	TranscriberType string
+	WhisperModel    string
 )
 
 func init() {
 	flag.StringVar(&Token, "token", "", "Discord Bot Token")
+	flag.StringVar(&TranscriberType, "transcriber", "mock", "Transcriber type: mock, whisper, or google")
+	flag.StringVar(&WhisperModel, "whisper-model", "", "Path to Whisper model file (required for whisper transcriber)")
 	flag.Parse()
 
 	// Load from environment
@@ -33,6 +37,14 @@ func init() {
 		Token = os.Getenv("DISCORD_TOKEN")
 	}
 	UserID = os.Getenv("DISCORD_USER_ID")
+	
+	// Override transcriber from env if set
+	if envTranscriber := os.Getenv("TRANSCRIBER_TYPE"); envTranscriber != "" {
+		TranscriberType = envTranscriber
+	}
+	if envWhisperModel := os.Getenv("WHISPER_MODEL_PATH"); envWhisperModel != "" {
+		WhisperModel = envWhisperModel
+	}
 }
 
 func main() {
@@ -66,9 +78,36 @@ func main() {
 	sessionManager := session.NewManager()
 	logrus.Debug("Session manager created")
 
-	// Create transcriber (mock for PoC)
-	trans := &transcriber.MockTranscriber{}
-	logrus.Debug("Transcriber initialized (mock mode)")
+	// Create transcriber based on configuration
+	var trans transcriber.Transcriber
+	var err error
+	switch strings.ToLower(TranscriberType) {
+	case "whisper":
+		if WhisperModel == "" {
+			logrus.Fatal("Whisper model path is required when using whisper transcriber")
+		}
+		trans, err = transcriber.NewWhisperTranscriber(WhisperModel)
+		if err != nil {
+			logrus.WithError(err).Fatal("Failed to initialize Whisper transcriber")
+		}
+		logrus.WithField("model", WhisperModel).Info("Using Whisper transcriber")
+	case "google":
+		trans, err = transcriber.NewGoogleTranscriber()
+		if err != nil {
+			logrus.WithError(err).Fatal("Failed to initialize Google transcriber")
+		}
+		logrus.Info("Using Google Speech-to-Text transcriber")
+	case "mock":
+		fallthrough
+	default:
+		trans = &transcriber.MockTranscriber{}
+		logrus.Info("Using mock transcriber")
+	}
+	defer func() {
+		if err := trans.Close(); err != nil {
+			logrus.WithError(err).Warn("Failed to close transcriber")
+		}
+	}()
 
 	// Create audio processor
 	audioProcessor := audio.NewProcessor(trans)

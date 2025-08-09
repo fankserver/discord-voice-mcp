@@ -139,6 +139,7 @@ internal/
 - Go 1.22+ 
 - FFmpeg (for audio processing)
 - Discord Bot Token
+- (Optional) Whisper.cpp and model file for real transcription
 
 ### Build & Test
 
@@ -164,6 +165,8 @@ ls -lh discord-voice-mcp
 | `DISCORD_TOKEN` | ✅ | Bot token from Discord Developer Portal | `MTIz...` |
 | `DISCORD_USER_ID` | ✅ | Your Discord user ID for "my channel" commands | `123456789012345678` |
 | `LOG_LEVEL` | ❌ | Logging verbosity (default: `info`) | `debug`, `info`, `warn`, `error` |
+| `TRANSCRIBER_TYPE` | ❌ | Transcription provider (default: `mock`) | `mock`, `whisper`, `google` |
+| `WHISPER_MODEL_PATH` | ⚠️ | Path to Whisper model (required if using `whisper`) | `/models/ggml-base.en.bin` |
 
 
 
@@ -198,6 +201,49 @@ ls -lh discord-voice-mcp
 "List all sessions and show me the latest transcript"
 ```
 
+## 🎤 Transcription Setup
+
+### Mock Transcription (Default)
+The server runs with mock transcription by default, which shows audio is being captured but doesn't transcribe actual content.
+
+### Whisper Transcription (Offline)
+For real offline transcription using Whisper:
+
+1. **Install whisper.cpp**:
+   ```bash
+   git clone https://github.com/ggerganov/whisper.cpp
+   cd whisper.cpp
+   make
+   ```
+
+2. **Download a Whisper model**:
+   ```bash
+   # Download base English model (142 MB)
+   bash ./models/download-ggml-model.sh base.en
+   ```
+
+3. **Run with Whisper**:
+   ```bash
+   docker run -i --rm \
+     -e DISCORD_TOKEN="your-bot-token" \
+     -e DISCORD_USER_ID="your-discord-user-id" \
+     -e TRANSCRIBER_TYPE="whisper" \
+     -e WHISPER_MODEL_PATH="/models/ggml-base.en.bin" \
+     -v /path/to/whisper.cpp/models:/models:ro \
+     ghcr.io/fankserver/discord-voice-mcp:latest
+   ```
+
+   Or with the binary:
+   ```bash
+   ./discord-voice-mcp \
+     -token "your-bot-token" \
+     -transcriber whisper \
+     -whisper-model "/path/to/whisper.cpp/models/ggml-base.en.bin"
+   ```
+
+### Google Speech-to-Text (Cloud)
+The Google Speech-to-Text transcriber is implemented but requires Google Cloud credentials configuration (not yet fully integrated).
+
 ## 🎯 Use Cases
 
 ### Personal Assistant
@@ -226,7 +272,7 @@ ls -lh discord-voice-mcp
 - ✅ **MCP SDK Integration** - Using official Go SDK v0.2.0
 
 ### In Progress
-- 🚧 **Transcription** - Whisper/Google Speech integration
+- ✅ **Transcription** - Whisper integration complete, Google Speech ready
 - 🚧 **Real-time Updates** - Live transcript streaming
 - 🚧 **Multi-user Support** - Track multiple speakers
 

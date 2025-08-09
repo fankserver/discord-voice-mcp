@@ -52,7 +52,7 @@ func (s *Server) registerTools() {
 		Type: "object",
 	}
 
-	mcp.AddTool[EmptyInput, JoinChannelOutput](s.mcpServer, &mcp.Tool{
+	mcp.AddTool[EmptyInput, struct{}](s.mcpServer, &mcp.Tool{
 		Name:        "join_my_voice_channel",
 		Description: "Join the voice channel where the configured user is",
 		InputSchema: joinMyChannelSchema,
@@ -70,7 +70,7 @@ func (s *Server) registerTools() {
 		Required: []string{"enabled"},
 	}
 
-	mcp.AddTool[FollowMeInput, FollowMeOutput](s.mcpServer, &mcp.Tool{
+	mcp.AddTool[FollowMeInput, struct{}](s.mcpServer, &mcp.Tool{
 		Name:        "follow_me",
 		Description: "Enable/disable auto-following the configured user between voice channels",
 		InputSchema: followMeSchema,
@@ -92,7 +92,7 @@ func (s *Server) registerTools() {
 		Required: []string{"guildId", "channelId"},
 	}
 
-	mcp.AddTool[JoinChannelInput, JoinChannelOutput](s.mcpServer, &mcp.Tool{
+	mcp.AddTool[JoinChannelInput, struct{}](s.mcpServer, &mcp.Tool{
 		Name:        "join_specific_channel",
 		Description: "Join a specific Discord voice channel by ID",
 		InputSchema: joinSchema,
@@ -103,7 +103,7 @@ func (s *Server) registerTools() {
 		Type: "object",
 	}
 
-	mcp.AddTool[EmptyInput, LeaveChannelOutput](s.mcpServer, &mcp.Tool{
+	mcp.AddTool[EmptyInput, struct{}](s.mcpServer, &mcp.Tool{
 		Name:        "leave_voice_channel",
 		Description: "Leave the current voice channel",
 		InputSchema: leaveSchema,
@@ -121,7 +121,7 @@ func (s *Server) registerTools() {
 		Required: []string{"sessionId"},
 	}
 
-	mcp.AddTool[GetTranscriptInput, GetTranscriptOutput](s.mcpServer, &mcp.Tool{
+	mcp.AddTool[GetTranscriptInput, struct{}](s.mcpServer, &mcp.Tool{
 		Name:        "get_transcript",
 		Description: "Get transcript for a session",
 		InputSchema: transcriptSchema,
@@ -132,7 +132,7 @@ func (s *Server) registerTools() {
 		Type: "object",
 	}
 
-	mcp.AddTool[EmptyInput, ListSessionsOutput](s.mcpServer, &mcp.Tool{
+	mcp.AddTool[EmptyInput, struct{}](s.mcpServer, &mcp.Tool{
 		Name:        "list_sessions",
 		Description: "List all transcription sessions",
 		InputSchema: listSchema,
@@ -150,7 +150,7 @@ func (s *Server) registerTools() {
 		Required: []string{"sessionId"},
 	}
 
-	mcp.AddTool[ExportSessionInput, ExportSessionOutput](s.mcpServer, &mcp.Tool{
+	mcp.AddTool[ExportSessionInput, struct{}](s.mcpServer, &mcp.Tool{
 		Name:        "export_session",
 		Description: "Export a session to JSON file",
 		InputSchema: exportSchema,
@@ -161,7 +161,7 @@ func (s *Server) registerTools() {
 		Type: "object",
 	}
 
-	mcp.AddTool[EmptyInput, BotStatusOutput](s.mcpServer, &mcp.Tool{
+	mcp.AddTool[EmptyInput, struct{}](s.mcpServer, &mcp.Tool{
 		Name:        "get_bot_status",
 		Description: "Get current bot connection status",
 		InputSchema: statusSchema,
@@ -175,12 +175,8 @@ type JoinChannelInput struct {
 	ChannelID string `json:"channelId"`
 }
 
-type JoinChannelOutput struct {
-	Success bool   `json:"success"`
-	Message string `json:"message"`
-}
 
-func (s *Server) handleJoinVoiceChannel(ctx context.Context, session *mcp.ServerSession, params *mcp.CallToolParamsFor[JoinChannelInput]) (*mcp.CallToolResultFor[JoinChannelOutput], error) {
+func (s *Server) handleJoinVoiceChannel(ctx context.Context, session *mcp.ServerSession, params *mcp.CallToolParamsFor[JoinChannelInput]) (*mcp.CallToolResultFor[struct{}], error) {
 	logrus.WithFields(logrus.Fields{
 		"guild_id":   params.Arguments.GuildID,
 		"channel_id": params.Arguments.ChannelID,
@@ -188,36 +184,30 @@ func (s *Server) handleJoinVoiceChannel(ctx context.Context, session *mcp.Server
 
 	err := s.bot.JoinChannel(params.Arguments.GuildID, params.Arguments.ChannelID)
 
-	output := JoinChannelOutput{
-		Success: err == nil,
-		Message: "Successfully joined voice channel",
+	var message string
+	if err == nil {
+		message = "Successfully joined voice channel"
+	} else {
+		message = fmt.Sprintf("Failed to join channel: %v", err)
 	}
 
-	if err != nil {
-		output.Message = fmt.Sprintf("Failed to join channel: %v", err)
-	}
-
-	return &mcp.CallToolResultFor[JoinChannelOutput]{
-		StructuredContent: output,
+	return &mcp.CallToolResultFor[struct{}]{
+		Content: []mcp.Content{
+			&mcp.TextContent{Text: message},
+		},
 	}, nil
 }
 
 type EmptyInput struct{}
 
-type LeaveChannelOutput struct {
-	Success bool   `json:"success"`
-	Message string `json:"message"`
-}
-
-func (s *Server) handleLeaveVoiceChannel(ctx context.Context, session *mcp.ServerSession, params *mcp.CallToolParamsFor[EmptyInput]) (*mcp.CallToolResultFor[LeaveChannelOutput], error) {
+func (s *Server) handleLeaveVoiceChannel(ctx context.Context, session *mcp.ServerSession, params *mcp.CallToolParamsFor[EmptyInput]) (*mcp.CallToolResultFor[struct{}], error) {
 	logrus.Debug("MCP: Leave voice channel request")
 
 	s.bot.LeaveChannel()
 
-	return &mcp.CallToolResultFor[LeaveChannelOutput]{
-		StructuredContent: LeaveChannelOutput{
-			Success: true,
-			Message: "Left voice channel",
+	return &mcp.CallToolResultFor[struct{}]{
+		Content: []mcp.Content{
+			&mcp.TextContent{Text: "Left voice channel"},
 		},
 	}, nil
 }
@@ -226,11 +216,7 @@ type GetTranscriptInput struct {
 	SessionID string `json:"sessionId"`
 }
 
-type GetTranscriptOutput struct {
-	Session *session.Session `json:"session"`
-}
-
-func (s *Server) handleGetTranscript(ctx context.Context, sess *mcp.ServerSession, params *mcp.CallToolParamsFor[GetTranscriptInput]) (*mcp.CallToolResultFor[GetTranscriptOutput], error) {
+func (s *Server) handleGetTranscript(ctx context.Context, sess *mcp.ServerSession, params *mcp.CallToolParamsFor[GetTranscriptInput]) (*mcp.CallToolResultFor[struct{}], error) {
 	logrus.WithField("session_id", params.Arguments.SessionID).Debug("MCP: Get transcript request")
 
 	sessionData, err := s.sessions.GetSession(params.Arguments.SessionID)
@@ -238,25 +224,41 @@ func (s *Server) handleGetTranscript(ctx context.Context, sess *mcp.ServerSessio
 		return nil, fmt.Errorf("session not found: %w", err)
 	}
 
-	return &mcp.CallToolResultFor[GetTranscriptOutput]{
-		StructuredContent: GetTranscriptOutput{
-			Session: sessionData,
+	// Format session data as text
+	transcript := fmt.Sprintf("Session %s\nStarted: %s\nTranscripts:\n", 
+		sessionData.ID, sessionData.StartTime.Format("2006-01-02 15:04:05"))
+	for _, t := range sessionData.Transcripts {
+		transcript += fmt.Sprintf("[%s] %s: %s\n", 
+			t.Timestamp.Format("15:04:05"), t.Username, t.Text)
+	}
+
+	return &mcp.CallToolResultFor[struct{}]{
+		Content: []mcp.Content{
+			&mcp.TextContent{Text: transcript},
 		},
 	}, nil
 }
 
-type ListSessionsOutput struct {
-	Sessions []session.Session `json:"sessions"`
-}
-
-func (s *Server) handleListSessions(ctx context.Context, sess *mcp.ServerSession, params *mcp.CallToolParamsFor[EmptyInput]) (*mcp.CallToolResultFor[ListSessionsOutput], error) {
+func (s *Server) handleListSessions(ctx context.Context, sess *mcp.ServerSession, params *mcp.CallToolParamsFor[EmptyInput]) (*mcp.CallToolResultFor[struct{}], error) {
 	logrus.Debug("MCP: List sessions request")
 
 	sessions := s.sessions.ListSessions()
 
-	return &mcp.CallToolResultFor[ListSessionsOutput]{
-		StructuredContent: ListSessionsOutput{
-			Sessions: sessions,
+	// Format sessions as text
+	var output string
+	if len(sessions) == 0 {
+		output = "No sessions found"
+	} else {
+		output = fmt.Sprintf("Found %d session(s):\n\n", len(sessions))
+		for _, s := range sessions {
+			output += fmt.Sprintf("Session %s\n  Started: %s\n  Transcripts: %d\n\n",
+				s.ID, s.StartTime.Format("2006-01-02 15:04:05"), len(s.Transcripts))
+		}
+	}
+
+	return &mcp.CallToolResultFor[struct{}]{
+		Content: []mcp.Content{
+			&mcp.TextContent{Text: output},
 		},
 	}, nil
 }
@@ -265,11 +267,7 @@ type ExportSessionInput struct {
 	SessionID string `json:"sessionId"`
 }
 
-type ExportSessionOutput struct {
-	Filepath string `json:"filepath"`
-}
-
-func (s *Server) handleExportSession(ctx context.Context, sess *mcp.ServerSession, params *mcp.CallToolParamsFor[ExportSessionInput]) (*mcp.CallToolResultFor[ExportSessionOutput], error) {
+func (s *Server) handleExportSession(ctx context.Context, sess *mcp.ServerSession, params *mcp.CallToolParamsFor[ExportSessionInput]) (*mcp.CallToolResultFor[struct{}], error) {
 	logrus.WithField("session_id", params.Arguments.SessionID).Debug("MCP: Export session request")
 
 	filepath, err := s.sessions.ExportSession(params.Arguments.SessionID)
@@ -277,73 +275,69 @@ func (s *Server) handleExportSession(ctx context.Context, sess *mcp.ServerSessio
 		return nil, fmt.Errorf("failed to export session: %w", err)
 	}
 
-	return &mcp.CallToolResultFor[ExportSessionOutput]{
-		StructuredContent: ExportSessionOutput{
-			Filepath: filepath,
+	message := fmt.Sprintf("Session exported to: %s", filepath)
+
+	return &mcp.CallToolResultFor[struct{}]{
+		Content: []mcp.Content{
+			&mcp.TextContent{Text: message},
 		},
 	}, nil
 }
 
-type BotStatusOutput struct {
-	Connected     bool   `json:"connected"`
-	InVoice       bool   `json:"inVoice"`
-	GuildID       string `json:"guildId,omitempty"`
-	ChannelID     string `json:"channelId,omitempty"`
-	FollowingUser string `json:"followingUser,omitempty"`
-	AutoFollow    bool   `json:"autoFollow"`
-}
-
-func (s *Server) handleGetBotStatus(ctx context.Context, sess *mcp.ServerSession, params *mcp.CallToolParamsFor[EmptyInput]) (*mcp.CallToolResultFor[BotStatusOutput], error) {
+func (s *Server) handleGetBotStatus(ctx context.Context, sess *mcp.ServerSession, params *mcp.CallToolParamsFor[EmptyInput]) (*mcp.CallToolResultFor[struct{}], error) {
 	logrus.Debug("MCP: Get bot status request")
 
 	status := s.bot.GetStatus()
 	followUser, autoFollow := s.bot.GetFollowStatus()
 
-	output := BotStatusOutput{
-		Connected:     status["connected"].(bool),
-		InVoice:       status["inVoice"].(bool),
-		FollowingUser: followUser,
-		AutoFollow:    autoFollow,
-	}
-
+	statusText := fmt.Sprintf("Bot Status:\n")
+	statusText += fmt.Sprintf("  Connected: %v\n", status["connected"])
+	statusText += fmt.Sprintf("  In Voice: %v\n", status["inVoice"])
+	
 	if guildID, ok := status["guildID"].(string); ok {
-		output.GuildID = guildID
+		statusText += fmt.Sprintf("  Guild ID: %s\n", guildID)
 	}
 	if channelID, ok := status["channelID"].(string); ok {
-		output.ChannelID = channelID
+		statusText += fmt.Sprintf("  Channel ID: %s\n", channelID)
 	}
+	
+	if followUser != "" {
+		statusText += fmt.Sprintf("  Following User: %s\n", followUser)
+	}
+	statusText += fmt.Sprintf("  Auto-Follow: %v", autoFollow)
 
-	return &mcp.CallToolResultFor[BotStatusOutput]{
-		StructuredContent: output,
+	return &mcp.CallToolResultFor[struct{}]{
+		Content: []mcp.Content{
+			&mcp.TextContent{Text: statusText},
+		},
 	}, nil
 }
 
 // handleJoinMyVoiceChannel joins the voice channel where the configured user is
-func (s *Server) handleJoinMyVoiceChannel(ctx context.Context, session *mcp.ServerSession, params *mcp.CallToolParamsFor[EmptyInput]) (*mcp.CallToolResultFor[JoinChannelOutput], error) {
+func (s *Server) handleJoinMyVoiceChannel(ctx context.Context, session *mcp.ServerSession, params *mcp.CallToolParamsFor[EmptyInput]) (*mcp.CallToolResultFor[struct{}], error) {
 	logrus.Debug("MCP: Join my voice channel request")
 
 	if s.userID == "" {
-		return &mcp.CallToolResultFor[JoinChannelOutput]{
-			StructuredContent: JoinChannelOutput{
-				Success: false,
-				Message: "No user ID configured. Set DISCORD_USER_ID environment variable",
+		return &mcp.CallToolResultFor[struct{}]{
+			Content: []mcp.Content{
+				&mcp.TextContent{Text: "No user ID configured. Set DISCORD_USER_ID environment variable"},
 			},
 		}, nil
 	}
 
 	err := s.bot.JoinUserChannel(s.userID)
 
-	output := JoinChannelOutput{
-		Success: err == nil,
-		Message: "Successfully joined your voice channel",
+	var message string
+	if err == nil {
+		message = "Successfully joined your voice channel"
+	} else {
+		message = fmt.Sprintf("Failed to join your channel: %v", err)
 	}
 
-	if err != nil {
-		output.Message = fmt.Sprintf("Failed to join your channel: %v", err)
-	}
-
-	return &mcp.CallToolResultFor[JoinChannelOutput]{
-		StructuredContent: output,
+	return &mcp.CallToolResultFor[struct{}]{
+		Content: []mcp.Content{
+			&mcp.TextContent{Text: message},
+		},
 	}, nil
 }
 
@@ -352,24 +346,14 @@ type FollowMeInput struct {
 	Enabled bool `json:"enabled"`
 }
 
-// FollowMeOutput represents the output for the follow_me tool
-type FollowMeOutput struct {
-	Success    bool   `json:"success"`
-	Message    string `json:"message"`
-	Following  bool   `json:"following"`
-	UserID     string `json:"userId,omitempty"`
-}
-
 // handleFollowMe enables or disables auto-following
-func (s *Server) handleFollowMe(ctx context.Context, session *mcp.ServerSession, params *mcp.CallToolParamsFor[FollowMeInput]) (*mcp.CallToolResultFor[FollowMeOutput], error) {
+func (s *Server) handleFollowMe(ctx context.Context, session *mcp.ServerSession, params *mcp.CallToolParamsFor[FollowMeInput]) (*mcp.CallToolResultFor[struct{}], error) {
 	logrus.WithField("enabled", params.Arguments.Enabled).Debug("MCP: Follow me request")
 
 	if s.userID == "" {
-		return &mcp.CallToolResultFor[FollowMeOutput]{
-			StructuredContent: FollowMeOutput{
-				Success:   false,
-				Message:   "No user ID configured. Set DISCORD_USER_ID environment variable",
-				Following: false,
+		return &mcp.CallToolResultFor[struct{}]{
+			Content: []mcp.Content{
+				&mcp.TextContent{Text: "No user ID configured. Set DISCORD_USER_ID environment variable"},
 			},
 		}, nil
 	}
@@ -385,12 +369,9 @@ func (s *Server) handleFollowMe(ctx context.Context, session *mcp.ServerSession,
 		}
 	}
 
-	return &mcp.CallToolResultFor[FollowMeOutput]{
-		StructuredContent: FollowMeOutput{
-			Success:   true,
-			Message:   message,
-			Following: params.Arguments.Enabled,
-			UserID:    s.userID,
+	return &mcp.CallToolResultFor[struct{}]{
+		Content: []mcp.Content{
+			&mcp.TextContent{Text: message},
 		},
 	}, nil
 }
