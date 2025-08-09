@@ -38,11 +38,6 @@ USER mcp
 
 # Note: No ports exposed as this uses stdin/stdout for MCP protocol
 
-# Audio processing configuration (defaults)
-ENV AUDIO_BUFFER_DURATION_SEC=2 \
-    AUDIO_SILENCE_TIMEOUT_MS=1500 \
-    AUDIO_MIN_BUFFER_MS=100
-
 # Run the binary
 CMD ["./discord-voice-mcp"]
 

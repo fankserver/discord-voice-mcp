@@ -68,11 +68,8 @@ RUN mkdir -p /models
 RUN adduser -D -u 1000 mcp
 USER mcp
 
-# Audio processing configuration (defaults)
-ENV AUDIO_BUFFER_DURATION_SEC=2 \
-    AUDIO_SILENCE_TIMEOUT_MS=1500 \
-    AUDIO_MIN_BUFFER_MS=100 \
-    TRANSCRIBER_TYPE=whisper
+# Set default transcriber type for whisper image
+ENV TRANSCRIBER_TYPE=whisper
 
 # Run the binary
 CMD ["./discord-voice-mcp"]
