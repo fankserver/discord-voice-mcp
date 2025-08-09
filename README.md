@@ -6,7 +6,7 @@ A pure MCP (Model Context Protocol) server for Discord voice channel transcripti
 
 | Component | Details |
 |-----------|---------|
-| Docker Image | **~12 MB** (minimal) / **~50 MB** (with ffmpeg) |
+| Docker Image | **~6 MB** (minimal) / **~56 MB** (with ffmpeg) |
 | Binary Size | ~15 MB |
 | Memory Usage | ~10-20 MB |
 | Language | Go 1.24 |
@@ -54,7 +54,7 @@ docker run --platform linux/amd64 -i --rm \
   -e DISCORD_USER_ID="your-discord-user-id" \
   ghcr.io/fankserver/discord-voice-mcp:latest
 
-# Use minimal image (8MB on AMD64, 25MB on ARM64)
+# Use minimal image (6MB on AMD64, 25MB on ARM64)
 docker run --platform linux/amd64 -i --rm \
   -e DISCORD_TOKEN="your-bot-token" \
   -e DISCORD_USER_ID="your-discord-user-id" \
@@ -127,7 +127,7 @@ pkg/
 
 ## 🔧 Technical Features
 
-- **Lightweight**: 12MB minimal Docker image, 50MB with ffmpeg
+- **Lightweight**: 6MB minimal Docker image, 56MB with ffmpeg
 - **Fast Startup**: Sub-second initialization
 - **Cross-Platform**: Compile for Windows, macOS, Linux, ARM
 - **Concurrent**: Go's goroutines handle multiple audio streams efficiently
@@ -340,8 +340,8 @@ docker run -i --rm \
 
 ### Technical Benefits
 - **Resource Efficiency** - Runs on Raspberry Pi or small VPS
-- **Fast Deployment** - 12-50MB images deploy instantly
-- **Cost Efficiency** - Small container footprint (12-50MB images)
+- **Fast Deployment** - 6-56MB images deploy instantly
+- **Cost Efficiency** - Small container footprint (6-56MB images)
 - **Cross-Platform** - Single binary for any OS
 - **Claude Integration** - Native MCP support
 
@@ -351,7 +351,7 @@ docker run -i --rm \
 - ✅ **Pure MCP Control** - No Discord text commands needed
 - ✅ **User-Centric Tools** - "Join my channel" functionality  
 - ✅ **Auto-Follow Mode** - Bot follows you automatically
-- ✅ **Minimal Docker Images** - 12MB minimal, 50MB with ffmpeg
+- ✅ **Minimal Docker Images** - 6MB minimal, 56MB with ffmpeg
 - ✅ **Voice Connection** - Stable Discord voice handling
 - ✅ **Session Management** - Organized transcript storage
 - ✅ **Audio Pipeline** - Real-time PCM processing

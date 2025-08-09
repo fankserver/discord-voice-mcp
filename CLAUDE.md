@@ -91,7 +91,7 @@ docker build --platform linux/amd64 -f Dockerfile.minimal -t discord-voice-mcp:m
 docker build --platform linux/arm64 -f Dockerfile.minimal -t discord-voice-mcp:minimal .  # ~25MB
 
 # Run with environment variables (specify platform for consistent behavior)
-docker run --platform linux/amd64 -e DISCORD_TOKEN="YOUR_TOKEN" discord-voice-mcp:latest
+docker run --platform linux/amd64 -e DISCORD_TOKEN="YOUR_TOKEN" -e DISCORD_USER_ID="YOUR_USER_ID" discord-voice-mcp:latest
 ```
 
 ### Testing Specific Components
@@ -163,7 +163,7 @@ AUDIO_MIN_BUFFER_MS=100       # Minimum audio before transcription (default: 100
 
 | Dockerfile | AMD64 Size | ARM64 Size | Notes |
 |------------|------------|------------|-------|
-| Dockerfile.minimal | ~6MB | ~25MB | Scratch base, static binary |
+| Dockerfile.minimal | ~6MB | ~25MB | Alpine base, dynamic binary |
 | Dockerfile | ~13MB | ~50MB | Alpine + ffmpeg |
 | Dockerfile.whisper | ~56MB | ~189MB | Includes whisper.cpp binaries |
 

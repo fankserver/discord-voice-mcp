@@ -40,4 +40,4 @@ COPY --from=builder /app/discord-voice-mcp .
 # Run as non-root user
 USER appuser
 
-ENTRYPOINT ["/discord-voice-mcp"]
+ENTRYPOINT ["./discord-voice-mcp"]
