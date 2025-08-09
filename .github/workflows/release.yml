@@ -40,13 +40,6 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
       
-      - name: Log in to Docker Hub
-        if: secrets.DOCKERHUB_USERNAME != ''
-        uses: docker/login-action@v3
-        with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
-      
       # Build and push normal image
       - name: Build and push normal Docker image
         uses: docker/build-push-action@v6
@@ -58,8 +51,6 @@ jobs:
           tags: |
             ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.event.release.tag_name || github.event.inputs.tag }}
             ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
-            ${{ secrets.DOCKERHUB_USERNAME != '' && format('docker.io/{0}/discord-voice-mcp:{1}', secrets.DOCKERHUB_USERNAME, github.event.release.tag_name || github.event.inputs.tag) || '' }}
-            ${{ secrets.DOCKERHUB_USERNAME != '' && format('docker.io/{0}/discord-voice-mcp:latest', secrets.DOCKERHUB_USERNAME) || '' }}
           labels: |
             org.opencontainers.image.title=Discord Voice MCP
             org.opencontainers.image.description=Discord voice channel transcription with MCP integration
@@ -78,10 +69,8 @@ jobs:
           platforms: linux/amd64,linux/arm64
           push: true
           tags: |
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.event.release.tag_name }}-minimal
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.event.release.tag_name || github.event.inputs.tag }}-minimal
             ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:minimal
-            ${{ secrets.DOCKERHUB_USERNAME != '' && format('docker.io/{0}/discord-voice-mcp:{1}-minimal', secrets.DOCKERHUB_USERNAME, github.event.release.tag_name) || '' }}
-            ${{ secrets.DOCKERHUB_USERNAME != '' && format('docker.io/{0}/discord-voice-mcp:minimal', secrets.DOCKERHUB_USERNAME) || '' }}
           labels: |
             org.opencontainers.image.title=Discord Voice MCP (Minimal)
             org.opencontainers.image.description=Minimal Discord voice MCP without ffmpeg
