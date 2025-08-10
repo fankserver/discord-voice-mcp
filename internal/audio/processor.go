@@ -33,6 +33,7 @@ const (
 	defaultBufferDurationSec = 2    // Default buffer duration in seconds
 	defaultSilenceTimeoutMs  = 1500 // Default silence timeout in milliseconds
 	defaultMinAudioMs        = 100  // Default minimum audio in milliseconds
+	defaultOverlapMs         = 200  // Default overlap duration in milliseconds
 )
 
 // Configurable variables (set from environment or defaults)
@@ -78,6 +79,14 @@ func init() {
 	// Calculate minimum buffer size: (samples/sec * channels * bytes/sample * ms) / 1000
 	minAudioBuffer = (sampleRate * channels * 2 * minAudioMs) / 1000
 
+	// Get overlap duration
+	overlapMs := defaultOverlapMs
+	if val := os.Getenv("AUDIO_OVERLAP_MS"); val != "" {
+		if parsed, err := strconv.Atoi(val); err == nil && parsed >= 0 {
+			overlapMs = parsed
+		}
+	}
+	
 	// Log configuration
 	logrus.WithFields(logrus.Fields{
 		"buffer_duration_sec": bufferDuration,
@@ -85,6 +94,7 @@ func init() {
 		"silence_timeout_ms":  silenceMs,
 		"min_audio_ms":        minAudioMs,
 		"min_audio_bytes":     minAudioBuffer,
+		"overlap_ms":          overlapMs,
 	}).Info("Audio processor configuration loaded")
 }
 
@@ -300,22 +310,37 @@ func (p *Processor) transcribeAndClear(stream *Stream, sessionManager *session.M
 
 	audioData := stream.Buffer.Bytes()
 	
-	// Save last 1 second of audio for overlap (48kHz * 2 channels * 2 bytes * 1 second)
-	overlapSize := sampleRate * channels * 2 * 1 // 192,000 bytes
-	
-	// Determine the size of the overlap to copy
-	copySize := overlapSize
-	if len(audioData) < overlapSize {
-		copySize = len(audioData)
+	// Save audio for overlap to prevent word cutoffs
+	// Get overlap duration from environment or use default
+	overlapDurationMs := defaultOverlapMs
+	if val := os.Getenv("AUDIO_OVERLAP_MS"); val != "" {
+		if parsed, err := strconv.Atoi(val); err == nil && parsed >= 0 {
+			overlapDurationMs = parsed
+		}
 	}
 	
-	// Reuse buffer if capacity is sufficient to avoid re-allocation
-	if cap(stream.overlapBuffer) < copySize {
-		stream.overlapBuffer = make([]byte, copySize)
+	// Calculate overlap size in bytes
+	// Note: 200ms is usually enough to capture word boundaries without causing duplicate transcriptions
+	overlapSize := (sampleRate * channels * 2 * overlapDurationMs) / 1000
+	
+	// Skip overlap if disabled (overlapDurationMs = 0)
+	if overlapDurationMs == 0 {
+		stream.overlapBuffer = nil
 	} else {
-		stream.overlapBuffer = stream.overlapBuffer[:copySize]
+		// Determine the size of the overlap to copy
+		copySize := overlapSize
+		if len(audioData) < overlapSize {
+			copySize = len(audioData)
+		}
+		
+		// Reuse buffer if capacity is sufficient to avoid re-allocation
+		if cap(stream.overlapBuffer) < copySize {
+			stream.overlapBuffer = make([]byte, copySize)
+		} else {
+			stream.overlapBuffer = stream.overlapBuffer[:copySize]
+		}
+		copy(stream.overlapBuffer, audioData[len(audioData)-copySize:])
 	}
-	copy(stream.overlapBuffer, audioData[len(audioData)-copySize:])
 	
 	// Get context from previous transcript
 	lastTranscript := stream.lastTranscript

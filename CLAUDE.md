@@ -133,6 +133,7 @@ Configurable via environment variables:
 - `AUDIO_BUFFER_DURATION_SEC`: Buffer size trigger (default: 2 seconds)
 - `AUDIO_SILENCE_TIMEOUT_MS`: Silence detection timeout (default: 1500ms)
 - `AUDIO_MIN_BUFFER_MS`: Minimum audio before transcription (default: 100ms)
+- `AUDIO_OVERLAP_MS`: Audio overlap between chunks to prevent word cutoffs (default: 200ms, set to 0 to disable)
 
 ### Error Handling Patterns
 - Safe type assertions to prevent panics (check `ok` return)
@@ -152,6 +153,7 @@ LOG_LEVEL=                 # debug, info, warn, error (default: info)
 AUDIO_BUFFER_DURATION_SEC=2   # Buffer duration trigger (default: 2 seconds)
 AUDIO_SILENCE_TIMEOUT_MS=1500 # Silence detection timeout (default: 1500ms)
 AUDIO_MIN_BUFFER_MS=100       # Minimum audio before transcription (default: 100ms)
+AUDIO_OVERLAP_MS=200          # Audio overlap to prevent word cutoffs (default: 200ms, 0 to disable)
 ```
 
 ## Docker Build Optimization
