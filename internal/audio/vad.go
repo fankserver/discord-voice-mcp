@@ -10,44 +10,77 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
-// Buffer pools to reduce allocations
+const (
+	// Maximum buffer sizes to prevent unbounded growth
+	maxMonoBufferSize       = 48000  // 1 second at 48kHz mono
+	maxDownsampleBufferSize = 16000  // 1 second at 16kHz
+	maxFrameBufferSize      = 32000  // 1 second worth of bytes
+	
+	// WebRTC VAD frame sizes at 16kHz
+	frameSize10ms = 160  // 10ms at 16kHz
+	frameSize20ms = 320  // 20ms at 16kHz
+	frameSize30ms = 480  // 30ms at 16kHz
+	
+	// Audio parameters
+	discordSampleRate = 48000
+	vadSampleRate     = 16000
+	downsampleRatio   = 3  // 48kHz / 16kHz
+)
+
+// Buffer pools for efficient memory reuse
 var (
-	monoBufferPool = sync.Pool{
+	// Pool for temporary mono conversion buffers
+	tempMonoPool = sync.Pool{
 		New: func() interface{} {
-			return make([]int16, 480) // 960 stereo samples / 2
+			return &[]int16{}
 		},
 	}
-	downsampleBufferPool = sync.Pool{
+	
+	// Pool for temporary downsample buffers
+	tempDownsamplePool = sync.Pool{
 		New: func() interface{} {
-			return make([]int16, 320) // 960 / 3 for 48kHz -> 16kHz
+			return &[]int16{}
 		},
 	}
-	byteBufferPool = sync.Pool{
+	
+	// Pool for temporary byte buffers
+	tempBytePool = sync.Pool{
 		New: func() interface{} {
-			return make([]byte, 640) // 320 samples * 2 bytes
+			return &[]byte{}
 		},
 	}
 )
 
+// getBuffer gets a buffer from pool and ensures it has the required capacity
+func getBuffer[T any](pool *sync.Pool, size int) *[]T {
+	buf := pool.Get().(*[]T)
+	if cap(*buf) < size {
+		*buf = make([]T, size)
+	} else {
+		*buf = (*buf)[:size]
+	}
+	return buf
+}
+
 // VoiceActivityDetector uses Google's WebRTC VAD implementation
 type VoiceActivityDetector struct {
-	vad                  webrtcvad.VadInst
-	mode                 int // 0-3, higher is more aggressive
-	frameSize            int // Samples per frame (must be 160, 320, or 480 for 16kHz)
-	sampleRate           int // Must be 8000, 16000, 32000, or 48000
-	speechFramesRequired int
+	vad                   webrtcvad.VadInst
+	mode                  int // 0-3, higher is more aggressive
+	speechFramesRequired  int
 	silenceFramesRequired int
-	speechCount          int
-	silenceCount         int
-	isSpeaking           bool
+	speechCount           int
+	silenceCount          int
+	isSpeaking            bool
 	
-	// Reusable buffers to avoid allocations
-	monoBuffer       []int16 // Buffer for mono conversion
-	downsampleBuffer []int16 // Buffer for downsampled audio
-	frameBytes       []byte  // Buffer for WebRTC VAD input
+	// Frame buffer for incomplete frames
+	frameBuffer      []int16 // Buffer for incomplete frames at 16kHz
+	frameBufferPos   int     // Current position in frame buffer
 	
-	// Low-pass filter coefficients for anti-aliasing
+	// Anti-aliasing filter (improved design)
 	filterCoeffs []float64
+	filterDelay  []float64 // Filter delay line for continuous processing
+	
+	mu sync.Mutex // Protect concurrent access
 }
 
 // VADConfig holds configuration for Voice Activity Detector
@@ -78,20 +111,17 @@ func NewVoiceActivityDetectorWithConfig(config VADConfig) *VoiceActivityDetector
 	vad := &VoiceActivityDetector{
 		vad:                   webrtcvad.Create(),
 		mode:                  config.Mode,
-		frameSize:             320, // 20ms at 16kHz
-		sampleRate:            16000, // WebRTC VAD works best at 16kHz
 		speechFramesRequired:  config.SpeechFramesRequired,
 		silenceFramesRequired: config.SilenceFramesRequired,
 		isSpeaking:            false,
-		
-		// Pre-allocate buffers
-		monoBuffer:       make([]int16, 480),  // 960 stereo / 2
-		downsampleBuffer: make([]int16, 320),  // 320 samples at 16kHz
-		frameBytes:       make([]byte, 640),   // 320 * 2 bytes
-		
-		// Initialize filter coefficients for Butterworth low-pass at 8kHz
-		filterCoeffs: generateLowPassCoeffs(8000, 48000),
+		frameBuffer:           make([]int16, 0, frameSize30ms),
+		frameBufferPos:        0,
+		// Use improved 64-tap filter for better anti-aliasing
+		filterCoeffs:          generateImprovedLowPassCoeffs(8000, discordSampleRate, 64),
 	}
+	
+	// Initialize filter delay line
+	vad.filterDelay = make([]float64, len(vad.filterCoeffs))
 	
 	// Initialize WebRTC VAD
 	if err := webrtcvad.Init(vad.vad); err != nil {
@@ -106,106 +136,116 @@ func NewVoiceActivityDetectorWithConfig(config VADConfig) *VoiceActivityDetector
 	}
 	
 	logrus.WithFields(logrus.Fields{
-		"mode":                 vad.mode,
-		"sample_rate":          vad.sampleRate,
-		"frame_size":           vad.frameSize,
-		"speech_frames":        vad.speechFramesRequired,
-		"silence_frames":       vad.silenceFramesRequired,
-	}).Info("WebRTC VAD initialized")
+		"mode":            vad.mode,
+		"speech_frames":   vad.speechFramesRequired,
+		"silence_frames":  vad.silenceFramesRequired,
+		"filter_taps":     len(vad.filterCoeffs),
+	}).Info("WebRTC VAD initialized with improved design")
 	
 	return vad
 }
 
-// DetectVoiceActivity analyzes PCM audio samples to detect voice
-// Now accepts int16 samples directly to avoid redundant conversions
-func (vad *VoiceActivityDetector) DetectVoiceActivity(samples []int16) bool {
-	// Handle nil or empty data as silence
-	if samples == nil || len(samples) == 0 {
+// ProcessAudio processes audio samples and returns voice activity detection result
+// This replaces DetectVoiceActivity with a cleaner API
+func (vad *VoiceActivityDetector) ProcessAudio(samples []int16) bool {
+	vad.mu.Lock()
+	defer vad.mu.Unlock()
+	
+	// Handle empty input as silence (cleaner than nil check)
+	if len(samples) == 0 {
 		vad.updateState(false)
 		return vad.isSpeaking
 	}
 	
-	// Discord provides 48kHz stereo, but WebRTC VAD needs 16kHz mono
-	// Step 1: Convert stereo to mono (reuse buffer)
+	// Prevent unbounded growth - reject oversized buffers
+	if len(samples) > maxMonoBufferSize*2 { // stereo limit
+		logrus.Warn("Audio buffer too large, truncating to prevent memory issues")
+		samples = samples[:maxMonoBufferSize*2]
+	}
+	
+	// Get temporary buffers from pools
 	monoLength := len(samples) / 2
-	if monoLength > len(vad.monoBuffer) {
-		vad.monoBuffer = make([]int16, monoLength)
-	}
-	vad.convertToMonoInPlace(samples, vad.monoBuffer[:monoLength])
+	monoBuf := getBuffer[int16](&tempMonoPool, monoLength)
+	defer tempMonoPool.Put(monoBuf)
 	
-	// Step 2: Apply anti-aliasing filter and downsample to 16kHz
-	// This prevents aliasing that destroys high-frequency content
-	downsampledLength := monoLength / 3
-	if downsampledLength > len(vad.downsampleBuffer) {
-		vad.downsampleBuffer = make([]int16, downsampledLength)
-	}
-	vad.downsampleWithFilter(vad.monoBuffer[:monoLength], vad.downsampleBuffer[:downsampledLength])
+	// Convert stereo to mono
+	vad.stereoToMono(samples, *monoBuf)
 	
-	// WebRTC VAD requires exactly 10, 20, or 30ms of audio at 16kHz
-	// 20ms at 16kHz = 320 samples
-	if downsampledLength < vad.frameSize {
-		// Not enough samples for a full frame
-		vad.updateState(false)
-		return vad.isSpeaking
-	}
+	// Downsample with anti-aliasing filter
+	downsampledLength := monoLength / downsampleRatio
+	downsampledBuf := getBuffer[int16](&tempDownsamplePool, downsampledLength)
+	defer tempDownsamplePool.Put(downsampledBuf)
 	
-	// WebRTC VAD expects []byte in little-endian format (reuse buffer)
-	frameData := vad.downsampleBuffer[:vad.frameSize]
-	for i, sample := range frameData {
-		binary.LittleEndian.PutUint16(vad.frameBytes[i*2:], uint16(sample))
-	}
+	vad.downsampleWithImprovedFilter(*monoBuf, *downsampledBuf)
 	
-	// Process with WebRTC VAD
-	isVoice, err := webrtcvad.Process(vad.vad, vad.sampleRate, vad.frameBytes[:vad.frameSize*2], vad.frameSize)
-	if err != nil {
-		logrus.WithError(err).Debug("WebRTC VAD process error")
-		vad.updateState(false)
-		return vad.isSpeaking
+	// Process all audio, not just first 20ms
+	return vad.processDownsampledAudio(*downsampledBuf)
+}
+
+// processDownsampledAudio processes the entire downsampled buffer
+func (vad *VoiceActivityDetector) processDownsampledAudio(samples []int16) bool {
+	// Add samples to frame buffer
+	vad.frameBuffer = append(vad.frameBuffer, samples...)
+	
+	// Prevent unbounded growth of frame buffer
+	if len(vad.frameBuffer) > maxDownsampleBufferSize {
+		logrus.Warn("Frame buffer overflow, discarding old frames")
+		// Keep only the most recent data
+		vad.frameBuffer = vad.frameBuffer[len(vad.frameBuffer)-maxDownsampleBufferSize:]
 	}
 	
-	// Update state with hysteresis
-	vad.updateState(isVoice)
-	
-	logrus.WithFields(logrus.Fields{
-		"is_voice":      isVoice,
-		"is_speaking":   vad.isSpeaking,
-		"speech_count":  vad.speechCount,
-		"silence_count": vad.silenceCount,
-	}).Debug("WebRTC VAD analysis")
+	// Process complete frames (20ms at 16kHz = 320 samples)
+	for len(vad.frameBuffer) >= frameSize20ms {
+		// Get frame data
+		frameData := vad.frameBuffer[:frameSize20ms]
+		
+		// Get temporary byte buffer from pool
+		byteBuf := getBuffer[byte](&tempBytePool, frameSize20ms*2)
+		defer tempBytePool.Put(byteBuf)
+		
+		// Convert to bytes for WebRTC VAD
+		for i, sample := range frameData {
+			binary.LittleEndian.PutUint16((*byteBuf)[i*2:], uint16(sample))
+		}
+		
+		// Process with WebRTC VAD
+		isVoice, err := webrtcvad.Process(vad.vad, vadSampleRate, *byteBuf, frameSize20ms)
+		if err != nil {
+			logrus.WithError(err).Debug("WebRTC VAD process error")
+			isVoice = false
+		}
+		
+		// Update state
+		vad.updateState(isVoice)
+		
+		// Remove processed frame from buffer
+		vad.frameBuffer = vad.frameBuffer[frameSize20ms:]
+	}
 	
 	return vad.isSpeaking
 }
 
-// convertToMonoInPlace converts stereo samples to mono by averaging channels
-// Uses pre-allocated buffer to avoid allocations
-func (vad *VoiceActivityDetector) convertToMonoInPlace(stereoSamples []int16, output []int16) {
-	for i := 0; i < len(output); i++ {
-		left := int32(stereoSamples[i*2])
-		right := int32(stereoSamples[i*2+1])
-		// Use int32 to avoid overflow when averaging
-		output[i] = int16((left + right) / 2)
+// stereoToMono converts stereo samples to mono by averaging channels
+func (vad *VoiceActivityDetector) stereoToMono(stereo []int16, mono []int16) {
+	for i := 0; i < len(mono); i++ {
+		left := int32(stereo[i*2])
+		right := int32(stereo[i*2+1])
+		mono[i] = int16((left + right) / 2)
 	}
 }
 
-// downsampleWithFilter applies anti-aliasing filter and downsamples 48kHz to 16kHz
-// This prevents aliasing that would destroy frequencies above 8kHz
-func (vad *VoiceActivityDetector) downsampleWithFilter(input []int16, output []int16) {
-	// Apply 4th order Butterworth low-pass filter at 8kHz before downsampling
-	// This is a simple but effective anti-aliasing filter
-	
+// downsampleWithImprovedFilter applies improved anti-aliasing and downsamples
+func (vad *VoiceActivityDetector) downsampleWithImprovedFilter(input []int16, output []int16) {
 	filterLen := len(vad.filterCoeffs)
-	halfFilter := filterLen / 2
 	
+	// Process with proper convolution
 	for i := 0; i < len(output); i++ {
-		srcIdx := i * 3 // 3:1 downsampling ratio
+		srcIdx := i * downsampleRatio
 		
-		// Apply filter centered at current sample
+		// Convolution with filter
 		var sum float64
-		for j := 0; j < filterLen; j++ {
-			sampleIdx := srcIdx + j - halfFilter
-			if sampleIdx >= 0 && sampleIdx < len(input) {
-				sum += float64(input[sampleIdx]) * vad.filterCoeffs[j]
-			}
+		for j := 0; j < filterLen && srcIdx+j < len(input); j++ {
+			sum += float64(input[srcIdx+j]) * vad.filterCoeffs[j]
 		}
 		
 		// Clamp to int16 range
@@ -240,21 +280,27 @@ func (vad *VoiceActivityDetector) updateState(isVoice bool) {
 	}
 }
 
-// Reset resets the VAD state
+// Reset resets the VAD state and frame buffer
 func (vad *VoiceActivityDetector) Reset() {
+	vad.mu.Lock()
+	defer vad.mu.Unlock()
+	
 	vad.speechCount = 0
 	vad.silenceCount = 0
 	vad.isSpeaking = false
+	vad.frameBuffer = vad.frameBuffer[:0] // Reset but keep capacity
+	
+	// Clear filter delay line
+	for i := range vad.filterDelay {
+		vad.filterDelay[i] = 0
+	}
 }
 
-// IsSpeaking returns the current speaking state
+// IsSpeaking returns the current speaking state (thread-safe)
 func (vad *VoiceActivityDetector) IsSpeaking() bool {
+	vad.mu.Lock()
+	defer vad.mu.Unlock()
 	return vad.isSpeaking
-}
-
-// GetNoiseLevel returns 0 as WebRTC VAD doesn't provide noise level estimation
-func (vad *VoiceActivityDetector) GetNoiseLevel() float64 {
-	return 0.0 // WebRTC VAD doesn't expose noise level
 }
 
 // SetMode sets the WebRTC VAD aggressiveness mode (0-3)
@@ -262,42 +308,52 @@ func (vad *VoiceActivityDetector) SetMode(mode int) error {
 	if mode < 0 || mode > 3 {
 		return fmt.Errorf("invalid mode %d: must be 0-3", mode)
 	}
+	
+	vad.mu.Lock()
+	defer vad.mu.Unlock()
+	
 	vad.mode = mode
 	return webrtcvad.SetMode(vad.vad, mode)
 }
 
 // Free releases WebRTC VAD resources
 func (vad *VoiceActivityDetector) Free() {
+	vad.mu.Lock()
+	defer vad.mu.Unlock()
+	
 	if vad.vad != nil {
 		webrtcvad.Free(vad.vad)
 		vad.vad = nil
 	}
 }
 
-// generateLowPassCoeffs generates filter coefficients for a low-pass filter
-// Uses a windowed-sinc approach for anti-aliasing
-func generateLowPassCoeffs(cutoffFreq, sampleRate float64) []float64 {
-	// Use a reasonable filter length (must be odd)
-	filterLen := 21
-	coeffs := make([]float64, filterLen)
+// generateImprovedLowPassCoeffs generates better filter coefficients
+func generateImprovedLowPassCoeffs(cutoffFreq, sampleRate float64, numTaps int) []float64 {
+	if numTaps%2 == 0 {
+		numTaps++ // Ensure odd number of taps
+	}
+	
+	coeffs := make([]float64, numTaps)
 	
 	// Normalized cutoff frequency
 	wc := 2.0 * math.Pi * cutoffFreq / sampleRate
-	halfLen := filterLen / 2
+	halfLen := numTaps / 2
 	
-	// Generate sinc function with Hamming window
-	for i := 0; i < filterLen; i++ {
+	// Generate windowed-sinc filter with Kaiser window for better stopband
+	beta := 8.0 // Kaiser window parameter (higher = better stopband, wider transition)
+	
+	for i := 0; i < numTaps; i++ {
 		n := i - halfLen
+		
+		// Sinc function
 		if n == 0 {
 			coeffs[i] = wc / math.Pi
 		} else {
-			// Sinc function
 			coeffs[i] = math.Sin(wc*float64(n)) / (math.Pi * float64(n))
 		}
 		
-		// Apply Hamming window to reduce ringing
-		window := 0.54 - 0.46*math.Cos(2*math.Pi*float64(i)/float64(filterLen-1))
-		coeffs[i] *= window
+		// Apply Kaiser window
+		coeffs[i] *= kaiserWindow(i, numTaps, beta)
 	}
 	
 	// Normalize coefficients
@@ -310,4 +366,58 @@ func generateLowPassCoeffs(cutoffFreq, sampleRate float64) []float64 {
 	}
 	
 	return coeffs
+}
+
+// kaiserWindow computes Kaiser window coefficient
+func kaiserWindow(n, N int, beta float64) float64 {
+	alpha := float64(N-1) / 2.0
+	num := modifiedBesselI0(beta * math.Sqrt(1.0-math.Pow((float64(n)-alpha)/alpha, 2)))
+	den := modifiedBesselI0(beta)
+	return num / den
+}
+
+// modifiedBesselI0 computes modified Bessel function of first kind, order 0
+func modifiedBesselI0(x float64) float64 {
+	sum := 1.0
+	term := 1.0
+	
+	for k := 1; k < 50; k++ {
+		term *= (x / (2.0 * float64(k))) * (x / (2.0 * float64(k)))
+		sum += term
+		if term < 1e-10*sum {
+			break
+		}
+	}
+	
+	return sum
+}
+
+// Backward compatibility methods
+
+// DetectVoiceActivity is deprecated, use ProcessAudio instead
+// Kept for backward compatibility with existing code
+func (vad *VoiceActivityDetector) DetectVoiceActivity(samples []int16) bool {
+	return vad.ProcessAudio(samples)
+}
+
+// GetNoiseLevel returns 0 as WebRTC VAD doesn't provide noise level estimation
+func (vad *VoiceActivityDetector) GetNoiseLevel() float64 {
+	return 0.0 // WebRTC VAD doesn't expose noise level
+}
+
+// Deprecated internal methods for backward compatibility
+
+// convertToMonoInPlace is deprecated, use stereoToMono
+func (vad *VoiceActivityDetector) convertToMonoInPlace(stereo []int16, mono []int16) {
+	vad.stereoToMono(stereo, mono)
+}
+
+// downsampleWithFilter is deprecated, use downsampleWithImprovedFilter
+func (vad *VoiceActivityDetector) downsampleWithFilter(input []int16, output []int16) {
+	vad.downsampleWithImprovedFilter(input, output)
+}
+
+// generateLowPassCoeffs is deprecated, use generateImprovedLowPassCoeffs
+func generateLowPassCoeffs(cutoffFreq, sampleRate float64) []float64 {
+	return generateImprovedLowPassCoeffs(cutoffFreq, sampleRate, 64)
 }
