@@ -1,3 +1,4 @@
+# Universal GPU Support via Vulkan (AMD/Intel/NVIDIA)
 # Build stage for Go binary
 FROM golang:1.24-alpine3.21 AS go-builder
 
@@ -7,7 +8,7 @@ RUN apk add --no-cache git gcc musl-dev pkgconfig opus-dev
 
 WORKDIR /app
 
-# Copy go mod files
+# Copy go mod files first for better caching
 COPY go.mod go.sum ./
 RUN go mod download
 
@@ -19,52 +20,88 @@ COPY . .
 RUN CGO_ENABLED=1 go build -ldflags '-w -s' \
     -o discord-voice-mcp ./cmd/discord-voice-mcp
 
-# Build stage for whisper.cpp  
-FROM alpine:3.20 AS whisper-builder
+# For AMD64: Use Vulkan-enabled image (works on ALL GPUs)
+# hadolint ignore=DL3007
+FROM ghcr.io/kth8/whisper-server-vulkan:latest AS whisper-amd64
 
-# Pin to a specific version for reproducible builds
-ARG WHISPER_CPP_VERSION=v1.7.3
+# For ARM64: Build from source (Vulkan support for ARM GPUs)
+FROM ubuntu:22.04 AS whisper-arm64
 
-# Install build dependencies for whisper.cpp (including cmake which is now required)
-# hadolint ignore=DL3018
-RUN apk add --no-cache git make g++ bash cmake
+# Install build dependencies for ARM64
+# hadolint ignore=DL3008
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    cmake \
+    git \
+    ca-certificates \
+    pkg-config \
+    libopenblas-dev \
+    libvulkan-dev \
+    && rm -rf /var/lib/apt/lists/*
 
-# Clone whisper.cpp (separate layer for better caching)
+# Clone and build whisper.cpp for ARM64
 WORKDIR /build
-RUN git clone --depth 1 --branch ${WHISPER_CPP_VERSION} https://github.com/ggerganov/whisper.cpp.git
+# Pin to stable version for reproducible builds
+ARG WHISPER_CPP_VERSION=v1.7.3
+RUN git clone --depth 1 --branch ${WHISPER_CPP_VERSION} https://github.com/ggml-org/whisper.cpp.git
 
-# Build whisper.cpp (this layer only rebuilds if source changes)
 WORKDIR /build/whisper.cpp
-RUN cmake -B build -DGGML_CCACHE=OFF . && \
-    cmake --build build --config Release -- -j"$(nproc)" && \
-    chmod +x build/bin/*
+RUN cmake -B build \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DGGML_VULKAN=ON \
+        -DGGML_BLAS=ON \
+        -DGGML_BLAS_VENDOR=OpenBLAS \
+        -DGGML_ARM_NEON=ON \
+        -DBUILD_SHARED_LIBS=ON && \
+    cmake --build build --config Release -j"$(nproc)"
 
-# Final stage
-FROM alpine:3.20
+# Create consistent structure matching AMD64 prebuilt
+RUN mkdir -p /app && \
+    cp build/bin/whisper-cli /usr/local/bin/whisper && \
+    cp build/bin/whisper-server /usr/local/bin/whisper-server && \
+    cp build/src/libwhisper.so* /usr/local/lib/ && \
+    cp build/ggml/src/libggml*.so* /usr/local/lib/
 
-# Install runtime dependencies (including opus for dynamic linking)
-# hadolint ignore=DL3018
-RUN apk add --no-cache ffmpeg libstdc++ libgomp opus
+# Architecture selector
+ARG TARGETARCH
+# hadolint ignore=DL3006
+FROM whisper-${TARGETARCH} AS whisper-source
+
+# Final stage - Ubuntu base for Vulkan support
+FROM ubuntu:22.04 AS final
+
+# Install runtime dependencies including Vulkan
+# hadolint ignore=DL3008
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ffmpeg \
+    libopus0 \
+    libgomp1 \
+    libopenblas0 \
+    libvulkan1 \
+    mesa-vulkan-drivers \
+    && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
 # Copy Go binary from builder
 COPY --from=go-builder /app/discord-voice-mcp .
 
-# Copy whisper binaries from builder  
-COPY --from=whisper-builder /build/whisper.cpp/build/bin/main /usr/local/bin/whisper
-COPY --from=whisper-builder /build/whisper.cpp/build/bin/server /usr/local/bin/whisper-server
-# Copy whisper shared libraries from correct directories
-COPY --from=whisper-builder /build/whisper.cpp/build/src/libwhisper.so* /usr/local/lib/
-COPY --from=whisper-builder /build/whisper.cpp/build/ggml/src/libggml*.so* /usr/local/lib/
-# Update library cache, create directories, and add user
-RUN ldconfig /usr/local/lib && \
-    mkdir -p /models && \
-    adduser -D -u 1000 mcp
+# Copy whisper binaries from architecture-specific source
+COPY --from=whisper-source /usr/local/bin/whisper* /usr/local/bin/
+COPY --from=whisper-source /usr/local/lib/lib*.so* /usr/local/lib/
+
+# Update library cache
+RUN ldconfig
+
+# Create directories and add user
+RUN mkdir -p /models && \
+    useradd -m -u 1000 -s /bin/bash mcp
+
 USER mcp
 
 # Set default transcriber type for whisper image
 ENV TRANSCRIBER_TYPE=whisper
+ENV WHISPER_USE_GPU=true
 
 # Run the binary
 CMD ["./discord-voice-mcp"]

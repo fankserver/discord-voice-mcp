@@ -1,0 +1,69 @@
+# NVIDIA GPU Optimized via CUDA (Maximum Performance)
+# Build stage for Go binary - using Ubuntu for glibc compatibility
+FROM golang:1.24-bookworm AS go-builder
+
+# Install build dependencies
+# hadolint ignore=DL3008
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    git gcc pkg-config libopus-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Copy go mod files first for better caching
+COPY go.mod go.sum ./
+RUN go mod download
+
+# Copy source code
+COPY . .
+
+# Build binary with CGO
+# Using dynamic linking as static opus lib not available for all architectures
+RUN CGO_ENABLED=1 go build -ldflags '-w -s' \
+    -o discord-voice-mcp ./cmd/discord-voice-mcp
+
+# Use prebuilt CUDA-enabled image for maximum NVIDIA performance
+FROM ghcr.io/ggml-org/whisper.cpp:main-cuda AS whisper-source
+
+# Final stage with CUDA runtime for NVIDIA GPUs (includes CUDA libraries)
+FROM nvidia/cuda:12.2.0-runtime-ubuntu22.04 AS final
+
+# Install runtime dependencies
+# hadolint ignore=DL3008
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ffmpeg \
+    libopus0 \
+    libgomp1 \
+    libopenblas0 \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Copy Go binary from builder
+COPY --from=go-builder /app/discord-voice-mcp .
+
+# Copy whisper binaries from CUDA source
+COPY --from=whisper-source /app/build/bin/whisper-cli /usr/local/bin/whisper
+COPY --from=whisper-source /app/build/bin/whisper-server /usr/local/bin/whisper-server
+COPY --from=whisper-source /app/build/src/libwhisper.so* /usr/local/lib/
+# Copy all ggml libraries including base and CPU versions
+COPY --from=whisper-source /app/build/ggml/src/libggml*.so* /usr/local/lib/
+# Copy CUDA-specific library from its subdirectory
+COPY --from=whisper-source /app/build/ggml/src/ggml-cuda/libggml-cuda.so /usr/local/lib/
+
+# Update library cache
+RUN ldconfig
+
+# Create directories and add user
+RUN mkdir -p /models && \
+    useradd -m -u 1000 -s /bin/bash mcp
+
+USER mcp
+
+# Set default transcriber type for whisper image
+ENV TRANSCRIBER_TYPE=whisper
+ENV WHISPER_USE_GPU=true
+ENV WHISPER_GPU_TYPE=cuda
+
+# Run the binary
+CMD ["./discord-voice-mcp"]
