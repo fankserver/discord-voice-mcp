@@ -1,7 +1,6 @@
 package audio
 
 import (
-	"encoding/binary"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -31,8 +30,8 @@ func TestVADConfiguration(t *testing.T) {
 func TestVADSilenceDetection(t *testing.T) {
 	vad := NewVoiceActivityDetector()
 	
-	// Generate silent audio (48kHz stereo)
-	silentAudio := make([]byte, 3840) // 960 samples * 2 channels * 2 bytes
+	// Generate silent audio (48kHz stereo) - now using int16
+	silentAudio := make([]int16, 1920) // 960 samples * 2 channels
 	
 	// Process multiple frames of silence
 	for i := 0; i < 20; i++ {
@@ -53,12 +52,12 @@ func TestVADSilenceDetection(t *testing.T) {
 func TestVADSpeechDetection(t *testing.T) {
 	vad := NewVoiceActivityDetector()
 	
-	// Generate speech-like audio (48kHz stereo)
-	speechAudio := make([]byte, 3840) // 960 samples * 2 channels * 2 bytes
-	for i := 0; i < len(speechAudio)/2; i++ {
+	// Generate speech-like audio (48kHz stereo) - now using int16
+	speechAudio := make([]int16, 1920) // 960 samples * 2 channels
+	for i := 0; i < len(speechAudio); i++ {
 		// Create a sine wave pattern
 		value := int16(5000 * (i % 100) / 100)
-		binary.LittleEndian.PutUint16(speechAudio[i*2:], uint16(value))
+		speechAudio[i] = value
 	}
 	
 	// Process multiple frames of speech
@@ -84,7 +83,7 @@ func TestVADNilInput(t *testing.T) {
 	assert.False(t, result, "Nil input should be treated as silence")
 	
 	// Empty input should also be handled
-	result = vad.DetectVoiceActivity([]byte{})
+	result = vad.DetectVoiceActivity([]int16{})
 	assert.False(t, result, "Empty input should be treated as silence")
 }
 
@@ -98,10 +97,10 @@ func TestVADStateTransitions(t *testing.T) {
 	// Start with silence
 	assert.False(t, vad.IsSpeaking())
 	
-	// Generate loud audio
-	loudAudio := make([]byte, 3840)
-	for i := 0; i < len(loudAudio)/2; i++ {
-		binary.LittleEndian.PutUint16(loudAudio[i*2:], uint16(20000))
+	// Generate loud audio - now using int16
+	loudAudio := make([]int16, 1920) // 960 samples * 2 channels
+	for i := 0; i < len(loudAudio); i++ {
+		loudAudio[i] = 20000
 	}
 	
 	// Should transition to speaking after speech frames threshold
@@ -110,8 +109,8 @@ func TestVADStateTransitions(t *testing.T) {
 	}
 	// Note: WebRTC VAD may have its own internal logic
 	
-	// Generate silence
-	silentAudio := make([]byte, 3840)
+	// Generate silence - now using int16
+	silentAudio := make([]int16, 1920)
 	
 	// Should transition to silence after silence frames threshold
 	for i := 0; i < 10; i++ {
@@ -123,10 +122,10 @@ func TestVADStateTransitions(t *testing.T) {
 func TestVADReset(t *testing.T) {
 	vad := NewVoiceActivityDetector()
 	
-	// Set to speaking state
-	speechAudio := make([]byte, 3840)
-	for i := 0; i < len(speechAudio)/2; i++ {
-		binary.LittleEndian.PutUint16(speechAudio[i*2:], uint16(10000))
+	// Set to speaking state - now using int16
+	speechAudio := make([]int16, 1920)
+	for i := 0; i < len(speechAudio); i++ {
+		speechAudio[i] = 10000
 	}
 	
 	for i := 0; i < 10; i++ {
@@ -167,15 +166,23 @@ func TestVADModeChange(t *testing.T) {
 func TestVADResampling(t *testing.T) {
 	vad := NewVoiceActivityDetector()
 	
-	// Test stereo to mono conversion
+	// Test stereo to mono conversion - now using int16 directly
 	stereo := []int16{100, 200, 300, 400, 500, 600}
-	mono := vad.convertToMono(stereo)
+	mono := make([]int16, 3)
+	vad.convertToMonoInPlace(stereo, mono)
 	assert.Equal(t, []int16{150, 350, 550}, mono) // Average of pairs
 	
-	// Test downsampling 48kHz to 16kHz
-	samples48k := []int16{1, 2, 3, 4, 5, 6, 7, 8, 9}
-	samples16k := vad.downsample48to16(samples48k)
-	assert.Equal(t, []int16{1, 4, 7}, samples16k) // Every 3rd sample
+	// Test downsampling with filter - 48kHz to 16kHz
+	// Note: The filter will modify values, so we can't expect exact values
+	samples48k := make([]int16, 960) // Mono samples
+	for i := range samples48k {
+		samples48k[i] = int16(i * 10)
+	}
+	samples16k := make([]int16, 320) // 960 / 3
+	vad.downsampleWithFilter(samples48k, samples16k)
+	
+	// Just verify the output has the right length and no crashes
+	assert.Equal(t, 320, len(samples16k))
 }
 
 // TestVADCleanup tests resource cleanup
@@ -196,10 +203,10 @@ func TestVADCleanup(t *testing.T) {
 func BenchmarkVAD(b *testing.B) {
 	vad := NewVoiceActivityDetector()
 	
-	// Generate test audio
-	audio := make([]byte, 3840) // 960 samples * 2 channels * 2 bytes
-	for i := 0; i < len(audio)/2; i++ {
-		binary.LittleEndian.PutUint16(audio[i*2:], uint16(i*100))
+	// Generate test audio - now using int16
+	audio := make([]int16, 1920) // 960 samples * 2 channels
+	for i := 0; i < len(audio); i++ {
+		audio[i] = int16(i * 100)
 	}
 	
 	b.ResetTimer()

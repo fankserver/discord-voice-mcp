@@ -344,9 +344,13 @@ func TestProcessorVADSilenceDetection(t *testing.T) {
 		vad:      NewVoiceActivityDetector(),
 	}
 	
-	// Simulate speech
+	// Simulate speech - now using int16
+	speechAudio := make([]int16, 1920) // 960 * 2 channels
+	for i := range speechAudio {
+		speechAudio[i] = 5000
+	}
 	for i := 0; i < 5; i++ {
-		stream.vad.DetectVoiceActivity(make([]byte, 1920)) // Will detect as speech after a few frames
+		stream.vad.DetectVoiceActivity(speechAudio)
 	}
 	
 	// Now simulate silence - VAD should transition to silence
@@ -370,10 +374,10 @@ func TestProcessorVADStateTransitions(t *testing.T) {
 		vad:      NewVoiceActivityDetector(),
 	}
 	
-	// Generate speech audio
-	speechAudio := make([]byte, 1920)
-	for i := 0; i < len(speechAudio)/2; i++ {
-		binary.LittleEndian.PutUint16(speechAudio[i*2:], uint16(5000))
+	// Generate speech audio - now using int16
+	speechAudio := make([]int16, 1920) // 960 * 2 channels
+	for i := 0; i < len(speechAudio); i++ {
+		speechAudio[i] = 5000
 	}
 	
 	// Transition to speaking
@@ -382,9 +386,10 @@ func TestProcessorVADStateTransitions(t *testing.T) {
 	}
 	assert.True(t, stream.vad.IsSpeaking(), "Should be speaking")
 	
-	// Transition to silence
+	// Transition to silence - now using int16
+	silentAudio := make([]int16, 1920)
 	for i := 0; i < 20; i++ {
-		stream.vad.DetectVoiceActivity(make([]byte, 1920)) // Silent audio
+		stream.vad.DetectVoiceActivity(silentAudio) // Silent audio
 	}
 	assert.False(t, stream.vad.IsSpeaking(), "Should be silent")
 }
@@ -404,10 +409,10 @@ func TestVADNotTriggeredForSmallBuffer(t *testing.T) {
 		vad:      NewVoiceActivityDetector(),
 	}
 
-	// Simulate speech then silence transition with small buffer
-	speechAudio := make([]byte, 1920)
-	for i := 0; i < len(speechAudio)/2; i++ {
-		binary.LittleEndian.PutUint16(speechAudio[i*2:], uint16(5000))
+	// Simulate speech then silence transition with small buffer - now using int16
+	speechAudio := make([]int16, 1920)
+	for i := 0; i < len(speechAudio); i++ {
+		speechAudio[i] = 5000
 	}
 	
 	// Start speaking
@@ -437,32 +442,37 @@ func TestSmartBuffering(t *testing.T) {
 		vad:      NewVoiceActivityDetector(),
 	}
 	
-	// Generate silent audio
-	silentAudio := make([]byte, 1920) // All zeros
+	// Generate silent audio - now using int16
+	silentAudio := make([]int16, 1920) // All zeros
+	silentBytes := make([]byte, 3840)
 	
 	// Process silent audio - should not buffer
 	initialSize := stream.Buffer.Len()
 	for i := 0; i < 10; i++ {
 		stream.vad.DetectVoiceActivity(silentAudio)
 		if stream.vad.IsSpeaking() {
-			stream.Buffer.Write(silentAudio)
+			stream.Buffer.Write(silentBytes)
 		}
 	}
 	
 	assert.Equal(t, initialSize, stream.Buffer.Len(), "Buffer should not grow for silence")
 	assert.False(t, stream.vad.IsSpeaking(), "Should not be speaking")
 	
-	// Generate speech audio
-	speechAudio := make([]byte, 1920)
-	for i := 0; i < len(speechAudio)/2; i++ {
-		binary.LittleEndian.PutUint16(speechAudio[i*2:], uint16(8000))
+	// Generate speech audio - now using int16
+	speechAudio := make([]int16, 1920)
+	for i := 0; i < len(speechAudio); i++ {
+		speechAudio[i] = 8000
+	}
+	speechBytes := make([]byte, 3840)
+	for i := 0; i < len(speechAudio); i++ {
+		binary.LittleEndian.PutUint16(speechBytes[i*2:], uint16(speechAudio[i]))
 	}
 	
 	// Process speech audio - should buffer
 	for i := 0; i < 10; i++ {
 		stream.vad.DetectVoiceActivity(speechAudio)
 		if stream.vad.IsSpeaking() {
-			stream.Buffer.Write(speechAudio)
+			stream.Buffer.Write(speechBytes)
 		}
 	}
 	
@@ -485,10 +495,10 @@ func TestTranscribeAndClearResetsVAD(t *testing.T) {
 		vad:      NewVoiceActivityDetector(),
 	}
 	
-	// Put VAD in speaking state
-	speechAudio := make([]byte, 1920)
-	for i := 0; i < len(speechAudio)/2; i++ {
-		binary.LittleEndian.PutUint16(speechAudio[i*2:], uint16(8000))
+	// Put VAD in speaking state - now using int16
+	speechAudio := make([]int16, 1920)
+	for i := 0; i < len(speechAudio); i++ {
+		speechAudio[i] = 8000
 	}
 	for i := 0; i < 5; i++ {
 		stream.vad.DetectVoiceActivity(speechAudio)

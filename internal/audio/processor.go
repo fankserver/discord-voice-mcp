@@ -37,6 +37,7 @@ const (
 	defaultContextExpirationSec = 10   // Clear context after 10 seconds of no activity
 	
 	// VAD defaults
+	defaultVADMode              = 2     // Moderate aggressiveness (0-3)
 	defaultVADSpeechFrames      = 3     // Frames needed to confirm speech (60ms)
 	defaultVADSilenceFrames     = 15    // Frames needed to confirm silence (300ms)
 )
@@ -56,6 +57,7 @@ var (
 	contextExpiration time.Duration
 	
 	// VAD configuration
+	vadMode              int
 	vadSpeechFrames      int
 	vadSilenceFrames     int
 )
@@ -108,6 +110,14 @@ func init() {
 	}
 	contextExpiration = time.Duration(contextExpirationSec) * time.Second
 	
+	// VAD Mode (VAD_MODE)
+	vadMode = defaultVADMode
+	if val := os.Getenv("VAD_MODE"); val != "" {
+		if parsed, err := strconv.Atoi(val); err == nil && parsed >= 0 && parsed <= 3 {
+			vadMode = parsed
+		}
+	}
+	
 	// VAD Speech frames required (VAD_SPEECH_FRAMES)
 	vadSpeechFrames = defaultVADSpeechFrames
 	if val := os.Getenv("VAD_SPEECH_FRAMES"); val != "" {
@@ -133,6 +143,7 @@ func init() {
 		"min_audio_bytes":        minAudioBuffer,
 		"overlap_ms":             overlapMs,
 		"context_expiration_sec": contextExpirationSec,
+		"vad_mode":               vadMode,
 		"vad_speech_frames":      vadSpeechFrames,
 		"vad_silence_frames":     vadSilenceFrames,
 	}).Info("Audio processor configuration loaded")
@@ -210,7 +221,7 @@ func (p *Processor) ProcessVoiceReceive(vc *discordgo.VoiceConnection, sessionMa
 			// Check if we need to trigger transcription due to silence
 			stream.mu.Lock()
 			wasSpeaking := stream.vad.IsSpeaking()
-			stream.vad.DetectVoiceActivity(nil) // Process as silence
+			stream.vad.DetectVoiceActivity(nil) // Process as silence (nil indicates no audio)
 			isSpeaking := stream.vad.IsSpeaking()
 			bufferSize := stream.Buffer.Len()
 			stream.mu.Unlock()
@@ -227,40 +238,34 @@ func (p *Processor) ProcessVoiceReceive(vc *discordgo.VoiceConnection, sessionMa
 		}
 		
 		// Decode real audio packets
-		var pcmBytes []byte
-		{
-			// Decode opus to PCM (real audio)
-			pcm, err := decoder.Decode(packet.Opus, frameSize, false)
-			if err != nil {
-				logrus.WithError(err).Debug("Error decoding opus")
-				continue
-			}
-
-			logrus.WithFields(logrus.Fields{
-				"pcm_samples": len(pcm),
-				"ssrc":        packet.SSRC,
-			}).Debug("Decoded opus to PCM")
-
-			// Convert PCM to bytes (reuse buffer to reduce allocations)
-			if len(stream.decoderBuffer) < len(pcm)*2 {
-				stream.decoderBuffer = make([]byte, len(pcm)*2)
-			}
-			pcmBytes = stream.decoderBuffer[:len(pcm)*2]
-			for i := 0; i < len(pcm); i++ {
-				// Safe conversion from int16 to uint16 for binary encoding
-				// #nosec G115 - This is safe as we're reinterpreting the bits, not converting the value
-				binary.LittleEndian.PutUint16(pcmBytes[i*2:], uint16(pcm[i]))
-			}
+		// Decode opus to PCM (real audio)
+		pcm, err := decoder.Decode(packet.Opus, frameSize, false)
+		if err != nil {
+			logrus.WithError(err).Debug("Error decoding opus")
+			continue
 		}
 
-		// Run VAD on the PCM data
+		logrus.WithFields(logrus.Fields{
+			"pcm_samples": len(pcm),
+			"ssrc":        packet.SSRC,
+		}).Debug("Decoded opus to PCM")
+
+		// Run VAD on the PCM data directly (no conversion needed)
 		stream.mu.Lock()
 		wasSpeaking := stream.vad.IsSpeaking()
-		isSpeaking := stream.vad.DetectVoiceActivity(pcmBytes)
+		isSpeaking := stream.vad.DetectVoiceActivity(pcm) // Pass int16 directly
 		
 		// Smart buffering - only buffer when speaking
 		if isSpeaking {
 			// Voice detected - add to buffer
+			// Convert PCM to bytes for buffer storage
+			if len(stream.decoderBuffer) < len(pcm)*2 {
+				stream.decoderBuffer = make([]byte, len(pcm)*2)
+			}
+			pcmBytes := stream.decoderBuffer[:len(pcm)*2]
+			for i := 0; i < len(pcm); i++ {
+				binary.LittleEndian.PutUint16(pcmBytes[i*2:], uint16(pcm[i]))
+			}
 			stream.Buffer.Write(pcmBytes)
 			stream.lastAudioTime = time.Now()
 		}
@@ -296,6 +301,29 @@ func (p *Processor) ProcessVoiceReceive(vc *discordgo.VoiceConnection, sessionMa
 	}
 
 	logrus.Info("Voice receive channel closed")
+	
+	// Clean up all active streams
+	p.cleanupStreams()
+}
+
+// cleanupStreams releases resources for all active streams
+func (p *Processor) cleanupStreams() {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	
+	for streamID, stream := range p.activeStreams {
+		stream.mu.Lock()
+		if stream.vad != nil {
+			stream.vad.Free()
+			stream.vad = nil
+		}
+		stream.mu.Unlock()
+		
+		logrus.WithField("stream_id", streamID).Debug("Cleaned up stream resources")
+	}
+	
+	// Clear the map
+	p.activeStreams = make(map[string]*Stream)
 }
 
 func (p *Processor) getOrCreateStream(ssrc uint32, userID, username, nickname string, sessionManager *session.Manager, sessionID string) *Stream {
@@ -319,6 +347,7 @@ func (p *Processor) getOrCreateStream(ssrc uint32, userID, username, nickname st
 		Buffer:        new(bytes.Buffer),
 		lastAudioTime: time.Now(),
 		vad:           NewVoiceActivityDetectorWithConfig(VADConfig{
+			Mode:                  vadMode,
 			SpeechFramesRequired:  vadSpeechFrames,
 			SilenceFramesRequired: vadSilenceFrames,
 		}),
