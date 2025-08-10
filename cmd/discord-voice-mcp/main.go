@@ -87,11 +87,28 @@ func main() {
 		if WhisperModel == "" {
 			logrus.Fatal("Whisper model path is required when using whisper transcriber")
 		}
-		trans, err = transcriber.NewWhisperTranscriber(WhisperModel)
-		if err != nil {
-			logrus.WithError(err).Fatal("Failed to initialize Whisper transcriber")
+		// Check if GPU support is enabled (default for whisper Docker images)
+		if os.Getenv("WHISPER_USE_GPU") == "true" || os.Getenv("WHISPER_USE_GPU") == "" {
+			// Try GPU transcriber first
+			trans, err = transcriber.NewGPUWhisperTranscriber(WhisperModel)
+			if err != nil {
+				logrus.WithError(err).Warn("Failed to initialize GPU Whisper transcriber, falling back to CPU")
+				trans, err = transcriber.NewWhisperTranscriber(WhisperModel)
+				if err != nil {
+					logrus.WithError(err).Fatal("Failed to initialize CPU Whisper transcriber")
+				}
+				logrus.WithField("model", WhisperModel).Info("Using CPU Whisper transcriber (fallback)")
+			} else {
+				logrus.WithField("model", WhisperModel).Info("Using GPU-accelerated Whisper transcriber")
+			}
+		} else {
+			// Explicitly disabled GPU
+			trans, err = transcriber.NewWhisperTranscriber(WhisperModel)
+			if err != nil {
+				logrus.WithError(err).Fatal("Failed to initialize Whisper transcriber")
+			}
+			logrus.WithField("model", WhisperModel).Info("Using CPU Whisper transcriber (GPU disabled)")
 		}
-		logrus.WithField("model", WhisperModel).Info("Using Whisper transcriber")
 	case "google":
 		trans, err = transcriber.NewGoogleTranscriber()
 		if err != nil {
