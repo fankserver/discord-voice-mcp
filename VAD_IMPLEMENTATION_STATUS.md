@@ -57,16 +57,27 @@ All critical issues have been addressed in the latest implementation:
 
 **Result**: Clean, idiomatic Go API
 
-### 🟡 MAJOR: WebRTC VAD Limitations
+### ⚠️ UNRESOLVED: WebRTC VAD Limitations
 **Problem**:
-- Designed for narrow-band telephony (8-16kHz)
+- WebRTC VAD designed for narrow-band telephony (8-16kHz)
 - Discord uses 48kHz high-quality audio
-- Loses all frequency information above 8kHz
-- Missing critical speech harmonics and consonants
+- Current implementation loses ALL frequency information above 8kHz
+- Missing critical speech components:
+  - Consonants (especially 's', 'f', 'th') have energy >8kHz
+  - Voice harmonics extend to 12-15kHz
+  - Audio presence/brilliance (10-20kHz) completely lost
 
-**Impact**: Poor VAD accuracy for high-quality audio
+**Impact**: 
+- Reduced VAD accuracy, especially for:
+  - Female voices (higher fundamental frequency)
+  - Whispering or soft speech
+  - Non-English languages with different frequency profiles
+- 66% of Discord's audio bandwidth is thrown away
 
-**Consider**: Alternative VAD solutions that support 48kHz natively
+**Current Workaround**: 
+- Better anti-aliasing filter reduces artifacts but doesn't recover lost frequencies
+- Frame buffering ensures we process all available data
+- But we're still fundamentally limited by WebRTC VAD's design
 
 ### 🟡 MAJOR: Frame Size Assumptions
 **Problem**:
@@ -89,6 +100,28 @@ All critical issues have been addressed in the latest implementation:
 - ❌ Memory efficiency: WORSE (growing buffers)
 - ❌ Processing efficiency: WORSE (incomplete audio)
 - ❌ Correctness: WORSE (missing audio data)
+
+## Implemented Solution: Hybrid VAD
+
+Created `vad_hybrid.go` that addresses the WebRTC VAD limitations:
+
+### Features:
+1. **Full 48kHz Energy Detection**: No downsampling, preserves all frequencies
+2. **High-Frequency Analysis**: Specifically analyzes 8-24kHz range that WebRTC misses
+3. **Weighted Combination**: Combines multiple signals for better accuracy
+4. **Confidence Scoring**: Returns confidence level for decisions
+
+### How It Works:
+- Energy detection at native 48kHz (30% weight)
+- High-frequency component analysis (20% weight)  
+- WebRTC VAD at 16kHz (50% weight)
+- Combined scoring with hysteresis
+
+This hybrid approach:
+- ✅ Uses full frequency spectrum
+- ✅ Backwards compatible
+- ✅ Better accuracy for Discord audio
+- ✅ Still lightweight (no ML models)
 
 ## Recommended Solution Path
 
