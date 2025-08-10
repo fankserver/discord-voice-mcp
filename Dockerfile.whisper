@@ -1,3 +1,4 @@
+# Universal GPU Support via Vulkan (AMD/Intel/NVIDIA)
 # Build stage for Go binary
 FROM golang:1.24-alpine3.21 AS go-builder
 
@@ -19,10 +20,10 @@ COPY . .
 RUN CGO_ENABLED=1 go build -ldflags '-w -s' \
     -o discord-voice-mcp ./cmd/discord-voice-mcp
 
-# For AMD64: Use prebuilt CUDA-enabled image
-FROM ghcr.io/ggml-org/whisper.cpp:main-cuda AS whisper-amd64
+# For AMD64: Use Vulkan-enabled image (works on ALL GPUs)
+FROM ghcr.io/kth8/whisper-server-vulkan:latest AS whisper-amd64
 
-# For ARM64: Build from source (only when targeting ARM64)
+# For ARM64: Build from source (Vulkan support for ARM GPUs)
 FROM ubuntu:22.04 AS whisper-arm64
 
 # Install build dependencies for ARM64
@@ -34,6 +35,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     pkg-config \
     libopenblas-dev \
+    libvulkan-dev \
     && rm -rf /var/lib/apt/lists/*
 
 # Clone and build whisper.cpp for ARM64
@@ -43,6 +45,7 @@ RUN git clone --depth 1 https://github.com/ggml-org/whisper.cpp.git
 WORKDIR /build/whisper.cpp
 RUN cmake -B build \
         -DCMAKE_BUILD_TYPE=Release \
+        -DGGML_VULKAN=ON \
         -DGGML_BLAS=ON \
         -DGGML_BLAS_VENDOR=OpenBLAS \
         -DGGML_ARM_NEON=ON \
@@ -50,29 +53,29 @@ RUN cmake -B build \
     cmake --build build --config Release -j"$(nproc)"
 
 # Create consistent structure matching AMD64 prebuilt
-RUN mkdir -p /app/build && \
-    cp -r /build/whisper.cpp/build/* /app/build/
+RUN mkdir -p /app && \
+    cp build/bin/whisper-cli /usr/local/bin/whisper && \
+    cp build/bin/whisper-server /usr/local/bin/whisper-server && \
+    cp build/src/libwhisper.so* /usr/local/lib/ && \
+    cp build/ggml/src/libggml*.so* /usr/local/lib/
 
 # Architecture selector
 ARG TARGETARCH
 # hadolint ignore=DL3006
 FROM whisper-${TARGETARCH} AS whisper-source
 
-# Final stage with architecture-specific base
-FROM nvidia/cuda:12.2.0-base-ubuntu22.04 AS base-amd64
-FROM ubuntu:22.04 AS base-arm64
+# Final stage - Ubuntu base for Vulkan support
+FROM ubuntu:22.04 AS final
 
-ARG TARGETARCH
-# hadolint ignore=DL3006
-FROM base-${TARGETARCH} AS final
-
-# Install runtime dependencies
+# Install runtime dependencies including Vulkan
 # hadolint ignore=DL3008
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
     libopus0 \
     libgomp1 \
     libopenblas0 \
+    libvulkan1 \
+    mesa-vulkan-drivers \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
@@ -81,10 +84,8 @@ WORKDIR /app
 COPY --from=go-builder /app/discord-voice-mcp .
 
 # Copy whisper binaries from architecture-specific source
-COPY --from=whisper-source /app/build/bin/whisper-cli /usr/local/bin/whisper
-COPY --from=whisper-source /app/build/bin/whisper-server /usr/local/bin/whisper-server
-COPY --from=whisper-source /app/build/src/libwhisper.so* /usr/local/lib/
-COPY --from=whisper-source /app/build/ggml/src/libggml*.so* /usr/local/lib/
+COPY --from=whisper-source /usr/local/bin/whisper* /usr/local/bin/
+COPY --from=whisper-source /usr/local/lib/lib*.so* /usr/local/lib/
 
 # Update library cache
 RUN ldconfig
@@ -97,6 +98,7 @@ USER mcp
 
 # Set default transcriber type for whisper image
 ENV TRANSCRIBER_TYPE=whisper
+ENV WHISPER_USE_GPU=true
 
 # Run the binary
 CMD ["./discord-voice-mcp"]
