@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"runtime"
 	"strconv"
+	"strings"
 
 	"github.com/sirupsen/logrus"
 )
@@ -100,9 +101,25 @@ func NewWhisperTranscriber(modelPath string) (*WhisperTranscriber, error) {
 
 // Transcribe uses whisper.cpp CLI for transcription
 func (wt *WhisperTranscriber) Transcribe(audio []byte) (string, error) {
+	return wt.TranscribeWithContext(audio, TranscribeOptions{})
+}
+
+// TranscribeWithContext uses whisper.cpp CLI with context for better accuracy
+func (wt *WhisperTranscriber) TranscribeWithContext(audio []byte, opts TranscribeOptions) (string, error) {
+	// Use only the current audio chunk without overlap
+	// The overlap context is now provided via the --prompt parameter
+	finalAudio := audio
+
+	// Note: We don't prepend overlap audio anymore as it causes duplicates
+	// Context is maintained through the prompt parameter instead
+	if len(opts.OverlapAudio) > 0 {
+		logrus.Debug("Overlap audio available but not prepended (using prompt for context instead)")
+	}
+
 	logrus.WithFields(logrus.Fields{
-		"audio_bytes": len(audio),
+		"audio_bytes": len(finalAudio),
 		"model":       wt.modelPath,
+		"has_context": opts.PreviousTranscript != "",
 	}).Debug("WhisperTranscriber: Starting transcription")
 
 	// Convert PCM to WAV format using ffmpeg
@@ -118,7 +135,7 @@ func (wt *WhisperTranscriber) Transcribe(audio []byte) (string, error) {
 		"-f", "wav", // Output format: WAV
 		"-", // Output to stdout
 	)
-	cmd.Stdin = bytes.NewReader(audio)
+	cmd.Stdin = bytes.NewReader(finalAudio)
 
 	var wavBuf bytes.Buffer
 	var ffmpegErr bytes.Buffer
@@ -138,15 +155,35 @@ func (wt *WhisperTranscriber) Transcribe(audio []byte) (string, error) {
 	// Call whisper for transcription
 	// Using more specific parameters for better transcription
 	// #nosec G204 - modelPath is controlled by server configuration, not user input
-	whisperCmd := exec.Command(wt.whisperPath,
+	whisperArgs := []string{
 		"-m", wt.modelPath, // Model path
 		"-l", wt.language, // Language: configurable, defaults to auto-detect
 		"-t", wt.threads, // Threads: configurable for performance tuning
 		"-bs", wt.beamSize, // Beam size: smaller = faster, larger = more accurate
 		"--no-timestamps", // Don't include timestamps in output
 		"-otxt",           // Output format: plain text
-		"-",               // Read from stdin
-	)
+	}
+
+	// Add context from previous transcript as initial prompt
+	// This helps maintain continuity across chunk boundaries
+	// IMPORTANT: Use --prompt (not -p) for text prompts
+	// The -p flag expects an integer for parallel processing
+	if prompt := CreateContextPrompt(opts.PreviousTranscript); prompt != "" {
+		// Log the exact prompt for debugging
+		logrus.WithFields(logrus.Fields{
+			"prompt":       prompt,
+			"prompt_len":   len(prompt),
+			"prompt_words": len(strings.Fields(prompt)),
+		}).Debug("Using previous transcript as prompt")
+
+		// Use --prompt (not -p) for text prompts
+		// The -p flag is for number of processors, not prompt text!
+		whisperArgs = append(whisperArgs, "--prompt", prompt)
+	}
+
+	whisperArgs = append(whisperArgs, "-") // Read from stdin
+	// #nosec G204 - whisperPath is validated during initialization, arguments are controlled
+	whisperCmd := exec.Command(wt.whisperPath, whisperArgs...)
 	whisperCmd.Stdin = &wavBuf
 
 	var outBuf, errBuf bytes.Buffer

@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"runtime"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/sirupsen/logrus"
@@ -82,7 +83,7 @@ func NewGPUWhisperTranscriber(modelPath string) (*GPUWhisperTranscriber, error) 
 	if language == "" {
 		language = "auto"
 	}
-	
+
 	// Log language setting for debugging
 	if language != "auto" {
 		logrus.WithField("language", language).Info("Whisper language explicitly set")
@@ -135,14 +136,30 @@ func NewGPUWhisperTranscriber(modelPath string) (*GPUWhisperTranscriber, error) 
 
 // Transcribe uses whisper.cpp CLI with optional GPU acceleration
 func (wt *GPUWhisperTranscriber) Transcribe(audio []byte) (string, error) {
+	return wt.TranscribeWithContext(audio, TranscribeOptions{})
+}
+
+// TranscribeWithContext uses whisper.cpp CLI with context for better accuracy
+func (wt *GPUWhisperTranscriber) TranscribeWithContext(audio []byte, opts TranscribeOptions) (string, error) {
 	startTime := time.Now()
 
+	// Use only the current audio chunk without overlap
+	// The overlap context is now provided via the --prompt parameter
+	finalAudio := audio
+
+	// Note: We don't prepend overlap audio anymore as it causes duplicates
+	// Context is maintained through the prompt parameter instead
+	if len(opts.OverlapAudio) > 0 {
+		logrus.Debug("Overlap audio available but not prepended (using prompt for context instead)")
+	}
+
 	logrus.WithFields(logrus.Fields{
-		"audio_bytes":       len(audio),
-		"audio_duration_ms": len(audio) * 1000 / 192000,
+		"audio_bytes":       len(finalAudio),
+		"audio_duration_ms": len(finalAudio) * 1000 / 192000,
 		"model":             wt.modelPath,
 		"gpu":               wt.useGPU,
 		"gpu_layers":        wt.gpuLayers,
+		"has_context":       opts.PreviousTranscript != "",
 	}).Debug("GPUWhisperTranscriber: Starting transcription")
 
 	// Convert PCM to WAV format using ffmpeg
@@ -157,7 +174,7 @@ func (wt *GPUWhisperTranscriber) Transcribe(audio []byte) (string, error) {
 		"-f", "wav",
 		"-",
 	)
-	cmd.Stdin = bytes.NewReader(audio)
+	cmd.Stdin = bytes.NewReader(finalAudio)
 
 	var wavBuf bytes.Buffer
 	var ffmpegErr bytes.Buffer
@@ -187,7 +204,24 @@ func (wt *GPUWhisperTranscriber) Transcribe(audio []byte) (string, error) {
 		"--no-timestamps",
 		"-otxt",
 	}
-	
+
+	// Add context from previous transcript as initial prompt
+	// This helps maintain continuity across chunk boundaries
+	// IMPORTANT: Use --prompt (not -p) for text prompts
+	// The -p flag expects an integer for parallel processing
+	if prompt := CreateContextPrompt(opts.PreviousTranscript); prompt != "" {
+		// Log the exact prompt for debugging
+		logrus.WithFields(logrus.Fields{
+			"prompt":       prompt,
+			"prompt_len":   len(prompt),
+			"prompt_words": len(strings.Fields(prompt)),
+		}).Debug("Using previous transcript as prompt")
+
+		// Use --prompt (not -p) for text prompts
+		// The -p flag is for number of processors, not prompt text!
+		whisperArgs = append(whisperArgs, "--prompt", prompt)
+	}
+
 	// Add additional accuracy parameters for non-English languages
 	if wt.language != "auto" && wt.language != "en" {
 		// Higher temperature for better accuracy with non-English
