@@ -329,8 +329,8 @@ func TestPCMConversion(t *testing.T) {
 	assert.Equal(t, pcmSamples, recovered, "PCM conversion should be lossless")
 }
 
-// TestVADSilenceDetection tests VAD-based silence detection
-func TestVADSilenceDetection(t *testing.T) {
+// TestProcessorVADSilenceDetection tests VAD-based silence detection in processor
+func TestProcessorVADSilenceDetection(t *testing.T) {
 	mockTranscriber := new(MockTranscriber)
 	_ = NewProcessor(mockTranscriber)
 	_ = session.NewManager()
@@ -357,8 +357,8 @@ func TestVADSilenceDetection(t *testing.T) {
 	assert.False(t, stream.vad.IsSpeaking(), "VAD should detect silence")
 }
 
-// TestVADStateTransitions tests VAD state transitions trigger transcription
-func TestVADStateTransitions(t *testing.T) {
+// TestProcessorVADStateTransitions tests VAD state transitions trigger transcription
+func TestProcessorVADStateTransitions(t *testing.T) {
 	mockTranscriber := new(MockTranscriber)
 	_ = NewProcessor(mockTranscriber)
 	

@@ -155,10 +155,14 @@ WHISPER_MODEL_PATH=        # Required for whisper transcriber
 LOG_LEVEL=                 # debug, info, warn, error (default: info)
 
 # Audio processing configuration
-AUDIO_BUFFER_DURATION_SEC=3   # Buffer duration trigger (default: 3 seconds with prompt context)
+AUDIO_BUFFER_DURATION_SEC=3   # Buffer duration trigger (default: 3 seconds)
 AUDIO_SILENCE_TIMEOUT_MS=1500 # Silence detection timeout (default: 1500ms)
 AUDIO_MIN_BUFFER_MS=100       # Minimum audio before transcription (default: 100ms)
-AUDIO_OVERLAP_MS=0            # Audio overlap disabled (not needed with prompt context)
+AUDIO_CONTEXT_EXPIRATION_SEC=10 # Context preservation timeout (default: 10 seconds)
+
+# Voice Activity Detection (VAD) configuration - Uses WebRTC VAD
+VAD_SPEECH_FRAMES=3        # Frames required to confirm speech (default: 3)
+VAD_SILENCE_FRAMES=15      # Frames required to confirm silence (default: 15)
 ```
 
 ## Docker Build Optimization

@@ -37,7 +37,6 @@ const (
 	defaultContextExpirationSec = 10   // Clear context after 10 seconds of no activity
 	
 	// VAD defaults
-	defaultVADEnergyThreshold   = 0.01  // Energy threshold for voice detection
 	defaultVADSpeechFrames      = 3     // Frames needed to confirm speech (60ms)
 	defaultVADSilenceFrames     = 15    // Frames needed to confirm silence (300ms)
 )
@@ -57,7 +56,6 @@ var (
 	contextExpiration time.Duration
 	
 	// VAD configuration
-	vadEnergyThreshold   float64
 	vadSpeechFrames      int
 	vadSilenceFrames     int
 )
@@ -109,14 +107,6 @@ func init() {
 		}
 	}
 	contextExpiration = time.Duration(contextExpirationSec) * time.Second
-
-	// VAD Energy threshold (VAD_ENERGY_THRESHOLD)
-	vadEnergyThreshold = defaultVADEnergyThreshold
-	if val := os.Getenv("VAD_ENERGY_THRESHOLD"); val != "" {
-		if parsed, err := strconv.ParseFloat(val, 64); err == nil && parsed > 0 {
-			vadEnergyThreshold = parsed
-		}
-	}
 	
 	// VAD Speech frames required (VAD_SPEECH_FRAMES)
 	vadSpeechFrames = defaultVADSpeechFrames
@@ -143,7 +133,6 @@ func init() {
 		"min_audio_bytes":        minAudioBuffer,
 		"overlap_ms":             overlapMs,
 		"context_expiration_sec": contextExpirationSec,
-		"vad_energy_threshold":   vadEnergyThreshold,
 		"vad_speech_frames":      vadSpeechFrames,
 		"vad_silence_frames":     vadSilenceFrames,
 	}).Info("Audio processor configuration loaded")
@@ -330,7 +319,6 @@ func (p *Processor) getOrCreateStream(ssrc uint32, userID, username, nickname st
 		Buffer:        new(bytes.Buffer),
 		lastAudioTime: time.Now(),
 		vad:           NewVoiceActivityDetectorWithConfig(VADConfig{
-			EnergyThreshold:       vadEnergyThreshold,
 			SpeechFramesRequired:  vadSpeechFrames,
 			SilenceFramesRequired: vadSilenceFrames,
 		}),

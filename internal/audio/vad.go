@@ -2,52 +2,43 @@ package audio
 
 import (
 	"encoding/binary"
-	"math"
+	"fmt"
 
+	webrtcvad "github.com/baabaaox/go-webrtcvad"
 	"github.com/sirupsen/logrus"
 )
 
-// VoiceActivityDetector detects voice activity in audio samples
+// VoiceActivityDetector uses Google's WebRTC VAD implementation
 type VoiceActivityDetector struct {
-	// Energy-based VAD parameters
-	energyThreshold      float64 // Minimum energy threshold for voice
-	adaptiveThreshold    float64 // Adaptive threshold based on background noise
-	backgroundNoiseLevel float64 // Estimated background noise level
+	vad                  webrtcvad.VadInst
+	mode                 int // 0-3, higher is more aggressive
+	frameSize            int // Samples per frame (must be 160, 320, or 480 for 16kHz)
+	sampleRate           int // Must be 8000, 16000, 32000, or 48000
+	speechFramesRequired int
+	silenceFramesRequired int
+	speechCount          int
+	silenceCount         int
+	isSpeaking           bool
 	
-	// Zero-crossing rate for distinguishing voice from noise
-	zcThreshold float64 // Zero-crossing rate threshold
-	
-	// Smoothing parameters
-	smoothingFactor float64 // For exponential smoothing
-	speechCount     int     // Consecutive frames detected as speech
-	silenceCount    int     // Consecutive frames detected as silence
-	
-	// Thresholds for state transitions
-	speechFramesRequired  int // Frames needed to transition to speech
-	silenceFramesRequired int // Frames needed to transition to silence
-	
-	// Current state
-	isSpeaking bool
-}
-
-// NewVoiceActivityDetector creates a new VAD instance
-func NewVoiceActivityDetector() *VoiceActivityDetector {
-	return NewVoiceActivityDetectorWithConfig(VADConfig{})
+	// Resampling buffer for 48kHz -> 16kHz conversion
+	resampleBuffer []int16
 }
 
 // VADConfig holds configuration for Voice Activity Detector
 type VADConfig struct {
-	EnergyThreshold       float64
+	EnergyThreshold       float64 // Not used by WebRTC VAD
 	SpeechFramesRequired  int
 	SilenceFramesRequired int
 }
 
-// NewVoiceActivityDetectorWithConfig creates a new VAD with custom configuration
+// NewVoiceActivityDetector creates a new WebRTC-based VAD instance
+func NewVoiceActivityDetector() *VoiceActivityDetector {
+	return NewVoiceActivityDetectorWithConfig(VADConfig{})
+}
+
+// NewVoiceActivityDetectorWithConfig creates a new WebRTC VAD with custom configuration
 func NewVoiceActivityDetectorWithConfig(config VADConfig) *VoiceActivityDetector {
 	// Apply defaults if not specified
-	if config.EnergyThreshold <= 0 {
-		config.EnergyThreshold = 0.01
-	}
 	if config.SpeechFramesRequired <= 0 {
 		config.SpeechFramesRequired = 3
 	}
@@ -55,23 +46,44 @@ func NewVoiceActivityDetectorWithConfig(config VADConfig) *VoiceActivityDetector
 		config.SilenceFramesRequired = 15
 	}
 	
-	return &VoiceActivityDetector{
-		energyThreshold:       config.EnergyThreshold,
-		adaptiveThreshold:     config.EnergyThreshold,  // Start with base threshold
-		backgroundNoiseLevel:  0.001,                   // Initial noise estimate
-		zcThreshold:          0.25,                     // Zero-crossing rate threshold
-		smoothingFactor:      0.1,                      // Exponential smoothing factor
+	vad := &VoiceActivityDetector{
+		vad:                   webrtcvad.Create(),
+		mode:                  2, // Moderate aggressiveness (0-3)
+		frameSize:             320, // 20ms at 16kHz
+		sampleRate:            16000, // WebRTC VAD works best at 16kHz
 		speechFramesRequired:  config.SpeechFramesRequired,
 		silenceFramesRequired: config.SilenceFramesRequired,
-		isSpeaking:           false,
+		isSpeaking:            false,
+		resampleBuffer:        make([]int16, 0, 960), // Pre-allocate for resampling
 	}
+	
+	// Initialize WebRTC VAD
+	if err := webrtcvad.Init(vad.vad); err != nil {
+		logrus.WithError(err).Error("Failed to initialize WebRTC VAD")
+		return nil
+	}
+	
+	// Set mode (0-3, higher is more aggressive in filtering out non-speech)
+	if err := webrtcvad.SetMode(vad.vad, vad.mode); err != nil {
+		logrus.WithError(err).Error("Failed to set WebRTC VAD mode")
+		return nil
+	}
+	
+	logrus.WithFields(logrus.Fields{
+		"mode":                 vad.mode,
+		"sample_rate":          vad.sampleRate,
+		"frame_size":           vad.frameSize,
+		"speech_frames":        vad.speechFramesRequired,
+		"silence_frames":       vad.silenceFramesRequired,
+	}).Info("WebRTC VAD initialized")
+	
+	return vad
 }
 
 // DetectVoiceActivity analyzes PCM audio samples to detect voice
 func (vad *VoiceActivityDetector) DetectVoiceActivity(pcmData []byte) bool {
 	// Handle nil or empty data as silence
 	if pcmData == nil || len(pcmData) == 0 {
-		// Process as silence frame
 		vad.updateState(false)
 		return vad.isSpeaking
 	}
@@ -79,77 +91,76 @@ func (vad *VoiceActivityDetector) DetectVoiceActivity(pcmData []byte) bool {
 	// Convert byte array to int16 samples
 	samples := bytesToInt16(pcmData)
 	if len(samples) == 0 {
-		return false
+		vad.updateState(false)
+		return vad.isSpeaking
 	}
 	
-	// Calculate energy (RMS - Root Mean Square)
-	energy := calculateRMS(samples)
+	// Discord provides 48kHz stereo, but WebRTC VAD needs 16kHz mono
+	// Downsample from 48kHz stereo to 16kHz mono
+	monoSamples := vad.convertToMono(samples)
+	downsampledSamples := vad.downsample48to16(monoSamples)
 	
-	// Calculate zero-crossing rate
-	zcr := calculateZeroCrossingRate(samples)
+	// WebRTC VAD requires exactly 10, 20, or 30ms of audio at 16kHz
+	// 20ms at 16kHz = 320 samples
+	if len(downsampledSamples) < vad.frameSize {
+		// Not enough samples for a full frame
+		vad.updateState(false)
+		return vad.isSpeaking
+	}
 	
-	// Update adaptive threshold based on background noise
-	vad.updateNoiseEstimate(energy)
+	// Process the frame with WebRTC VAD
+	// Take only the required frame size
+	frameData := downsampledSamples[:vad.frameSize]
 	
-	// Determine if this frame contains voice
-	isVoice := vad.classifyFrame(energy, zcr)
+	// WebRTC VAD expects []byte in little-endian format
+	frameBytes := make([]byte, len(frameData)*2)
+	for i, sample := range frameData {
+		binary.LittleEndian.PutUint16(frameBytes[i*2:], uint16(sample))
+	}
 	
-	// Update state with hysteresis to prevent rapid switching
+	// Process with WebRTC VAD
+	isVoice, err := webrtcvad.Process(vad.vad, vad.sampleRate, frameBytes, len(frameData))
+	if err != nil {
+		logrus.WithError(err).Debug("WebRTC VAD process error")
+		vad.updateState(false)
+		return vad.isSpeaking
+	}
+	
+	// Update state with hysteresis
 	vad.updateState(isVoice)
 	
 	logrus.WithFields(logrus.Fields{
-		"energy":            energy,
-		"zcr":              zcr,
-		"threshold":        vad.adaptiveThreshold,
-		"noise_level":      vad.backgroundNoiseLevel,
-		"is_voice":         isVoice,
-		"is_speaking":      vad.isSpeaking,
-		"speech_count":     vad.speechCount,
-		"silence_count":    vad.silenceCount,
-	}).Debug("VAD analysis")
+		"is_voice":      isVoice,
+		"is_speaking":   vad.isSpeaking,
+		"speech_count":  vad.speechCount,
+		"silence_count": vad.silenceCount,
+	}).Debug("WebRTC VAD analysis")
 	
 	return vad.isSpeaking
 }
 
-// updateNoiseEstimate updates the background noise level estimate
-func (vad *VoiceActivityDetector) updateNoiseEstimate(energy float64) {
-	// Only update noise estimate during silence
-	if !vad.isSpeaking && energy < vad.adaptiveThreshold*2 {
-		// Exponential smoothing for noise level
-		vad.backgroundNoiseLevel = vad.smoothingFactor*energy + 
-			(1-vad.smoothingFactor)*vad.backgroundNoiseLevel
-		
-		// Update adaptive threshold (noise level + margin)
-		vad.adaptiveThreshold = vad.backgroundNoiseLevel * 3.0
-		
-		// Ensure minimum threshold
-		if vad.adaptiveThreshold < vad.energyThreshold {
-			vad.adaptiveThreshold = vad.energyThreshold
-		}
+// convertToMono converts stereo samples to mono by averaging channels
+func (vad *VoiceActivityDetector) convertToMono(stereoSamples []int16) []int16 {
+	// Assuming stereo input (2 channels)
+	monoSamples := make([]int16, len(stereoSamples)/2)
+	for i := 0; i < len(monoSamples); i++ {
+		left := stereoSamples[i*2]
+		right := stereoSamples[i*2+1]
+		// Average the two channels
+		monoSamples[i] = (left + right) / 2
 	}
+	return monoSamples
 }
 
-// classifyFrame determines if a frame contains voice based on features
-func (vad *VoiceActivityDetector) classifyFrame(energy, zcr float64) bool {
-	// Energy-based detection
-	if energy < vad.adaptiveThreshold {
-		return false
+// downsample48to16 downsamples from 48kHz to 16kHz (3:1 ratio)
+func (vad *VoiceActivityDetector) downsample48to16(samples48k []int16) []int16 {
+	// Simple downsampling by taking every 3rd sample
+	// For better quality, consider using a low-pass filter before downsampling
+	downsampled := make([]int16, len(samples48k)/3)
+	for i := 0; i < len(downsampled); i++ {
+		downsampled[i] = samples48k[i*3]
 	}
-	
-	// Zero-crossing rate helps distinguish voice from other sounds
-	// Voice typically has ZCR in a certain range
-	// Very high ZCR often indicates fricative sounds or noise
-	if zcr > vad.zcThreshold*2 {
-		// Very high ZCR, likely noise
-		return false
-	}
-	
-	// Additional check: energy should be significantly above noise
-	if energy < vad.backgroundNoiseLevel*2 {
-		return false
-	}
-	
-	return true
+	return downsampled
 }
 
 // updateState updates the VAD state with hysteresis
@@ -173,6 +184,40 @@ func (vad *VoiceActivityDetector) updateState(isVoice bool) {
 	}
 }
 
+// Reset resets the VAD state
+func (vad *VoiceActivityDetector) Reset() {
+	vad.speechCount = 0
+	vad.silenceCount = 0
+	vad.isSpeaking = false
+}
+
+// IsSpeaking returns the current speaking state
+func (vad *VoiceActivityDetector) IsSpeaking() bool {
+	return vad.isSpeaking
+}
+
+// GetNoiseLevel returns 0 as WebRTC VAD doesn't provide noise level estimation
+func (vad *VoiceActivityDetector) GetNoiseLevel() float64 {
+	return 0.0 // WebRTC VAD doesn't expose noise level
+}
+
+// SetMode sets the WebRTC VAD aggressiveness mode (0-3)
+func (vad *VoiceActivityDetector) SetMode(mode int) error {
+	if mode < 0 || mode > 3 {
+		return fmt.Errorf("invalid mode %d: must be 0-3", mode)
+	}
+	vad.mode = mode
+	return webrtcvad.SetMode(vad.vad, mode)
+}
+
+// Free releases WebRTC VAD resources
+func (vad *VoiceActivityDetector) Free() {
+	if vad.vad != nil {
+		webrtcvad.Free(vad.vad)
+		vad.vad = nil
+	}
+}
+
 // bytesToInt16 converts PCM byte array to int16 samples
 func bytesToInt16(pcmData []byte) []int16 {
 	if len(pcmData)%2 != 0 {
@@ -185,57 +230,4 @@ func bytesToInt16(pcmData []byte) []int16 {
 		samples[i] = int16(binary.LittleEndian.Uint16(pcmData[i*2:]))
 	}
 	return samples
-}
-
-// calculateRMS calculates the Root Mean Square (energy) of audio samples
-func calculateRMS(samples []int16) float64 {
-	if len(samples) == 0 {
-		return 0
-	}
-	
-	var sum float64
-	for _, sample := range samples {
-		// Normalize to [-1, 1] range
-		normalized := float64(sample) / 32768.0
-		sum += normalized * normalized
-	}
-	
-	return math.Sqrt(sum / float64(len(samples)))
-}
-
-// calculateZeroCrossingRate calculates how often the signal crosses zero
-func calculateZeroCrossingRate(samples []int16) float64 {
-	if len(samples) < 2 {
-		return 0
-	}
-	
-	crossings := 0
-	for i := 1; i < len(samples); i++ {
-		// Check if sign changed
-		if (samples[i-1] >= 0) != (samples[i] >= 0) {
-			crossings++
-		}
-	}
-	
-	// Normalize by sample count
-	return float64(crossings) / float64(len(samples)-1)
-}
-
-// Reset resets the VAD state
-func (vad *VoiceActivityDetector) Reset() {
-	vad.speechCount = 0
-	vad.silenceCount = 0
-	vad.isSpeaking = false
-	vad.backgroundNoiseLevel = 0.001
-	vad.adaptiveThreshold = vad.energyThreshold
-}
-
-// IsSpeaking returns the current speaking state
-func (vad *VoiceActivityDetector) IsSpeaking() bool {
-	return vad.isSpeaking
-}
-
-// GetNoiseLevel returns the estimated background noise level
-func (vad *VoiceActivityDetector) GetNoiseLevel() float64 {
-	return vad.backgroundNoiseLevel
 }
