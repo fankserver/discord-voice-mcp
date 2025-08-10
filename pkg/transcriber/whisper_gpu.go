@@ -143,18 +143,14 @@ func (wt *GPUWhisperTranscriber) Transcribe(audio []byte) (string, error) {
 func (wt *GPUWhisperTranscriber) TranscribeWithContext(audio []byte, opts TranscribeOptions) (string, error) {
 	startTime := time.Now()
 	
-	// DISABLED: Audio overlap causes duplicate transcriptions
-	// Since the whisper prompt feature is broken (causes stoi crash),
-	// we cannot use audio overlap as it gets transcribed twice.
-	// The overlap was meant to work WITH the prompt feature, not alone.
+	// Use only the current audio chunk without overlap
+	// The overlap context is now provided via the --prompt parameter
 	finalAudio := audio
-	if false && len(opts.OverlapAudio) > 0 {
-		// This would prepend overlap audio but causes duplicates
-		finalAudio = append(opts.OverlapAudio, audio...)
-		logrus.WithFields(logrus.Fields{
-			"overlap_bytes": len(opts.OverlapAudio),
-			"total_bytes":   len(finalAudio),
-		}).Debug("Using overlap audio for context")
+	
+	// Note: We don't prepend overlap audio anymore as it causes duplicates
+	// Context is maintained through the prompt parameter instead
+	if len(opts.OverlapAudio) > 0 {
+		logrus.Debug("Overlap audio available but not prepended (using prompt for context instead)")
 	}
 
 	logrus.WithFields(logrus.Fields{

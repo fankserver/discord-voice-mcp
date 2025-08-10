@@ -130,10 +130,10 @@ CGO_ENABLED=1 go build -a -tags netgo -ldflags '-w -s -extldflags "-static"'
 
 ### Audio Configuration
 Configurable via environment variables:
-- `AUDIO_BUFFER_DURATION_SEC`: Buffer size trigger (default: 5 seconds for better context)
-- `AUDIO_SILENCE_TIMEOUT_MS`: Silence detection timeout (default: 2000ms for natural pauses)
+- `AUDIO_BUFFER_DURATION_SEC`: Buffer size trigger (default: 3 seconds with prompt context)
+- `AUDIO_SILENCE_TIMEOUT_MS`: Silence detection timeout (default: 1500ms)
 - `AUDIO_MIN_BUFFER_MS`: Minimum audio before transcription (default: 100ms)
-- `AUDIO_OVERLAP_MS`: Audio overlap between chunks (default: 0 - disabled due to duplication issues)
+- `AUDIO_OVERLAP_MS`: Audio overlap between chunks (default: 0 - not needed with prompt context)
 
 ### Error Handling Patterns
 - Safe type assertions to prevent panics (check `ok` return)
@@ -150,10 +150,10 @@ WHISPER_MODEL_PATH=        # Required for whisper transcriber
 LOG_LEVEL=                 # debug, info, warn, error (default: info)
 
 # Audio processing configuration
-AUDIO_BUFFER_DURATION_SEC=5   # Buffer duration trigger (default: 5 seconds for better context)
-AUDIO_SILENCE_TIMEOUT_MS=2000 # Silence detection timeout (default: 2000ms for natural pauses)
+AUDIO_BUFFER_DURATION_SEC=3   # Buffer duration trigger (default: 3 seconds with prompt context)
+AUDIO_SILENCE_TIMEOUT_MS=1500 # Silence detection timeout (default: 1500ms)
 AUDIO_MIN_BUFFER_MS=100       # Minimum audio before transcription (default: 100ms)
-AUDIO_OVERLAP_MS=0            # Audio overlap disabled by default (causes duplicates without prompt)
+AUDIO_OVERLAP_MS=0            # Audio overlap disabled (not needed with prompt context)
 ```
 
 ## Docker Build Optimization
