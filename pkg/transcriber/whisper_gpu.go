@@ -208,9 +208,29 @@ func (wt *GPUWhisperTranscriber) TranscribeWithContext(audio []byte, opts Transc
 	
 	// Add context from previous transcript as initial prompt
 	// This helps maintain continuity across chunk boundaries
-	if prompt := CreateContextPrompt(opts.PreviousTranscript); prompt != "" {
-		whisperArgs = append(whisperArgs, "-p", prompt)
-		logrus.WithField("prompt_words", len(strings.Fields(prompt))).Debug("Using previous transcript as prompt")
+	// TEMPORARY: Disabled due to whisper.cpp crash with prompt parameter
+	// The crash shows "std::invalid_argument: stoi" which suggests whisper.cpp
+	// is trying to parse the prompt as an integer somewhere.
+	// TODO: Investigate whisper.cpp source to understand correct prompt format
+	const usePrompt = false // Temporarily disabled
+	if usePrompt {
+		if prompt := CreateContextPrompt(opts.PreviousTranscript); prompt != "" {
+			// Log the exact prompt for debugging
+			logrus.WithFields(logrus.Fields{
+				"prompt":       prompt,
+				"prompt_len":   len(prompt),
+				"prompt_words": len(strings.Fields(prompt)),
+			}).Debug("Using previous transcript as prompt")
+			
+			// Use --prompt instead of -p to avoid parsing issues
+			// Also ensure the prompt is properly escaped
+			whisperArgs = append(whisperArgs, "--prompt", prompt)
+		}
+	}
+	
+	// Log that we're using overlap audio for context instead of prompt
+	if len(opts.OverlapAudio) > 0 {
+		logrus.Info("Using overlap audio for context (prompt temporarily disabled due to whisper.cpp issue)")
 	}
 	
 	// Add additional accuracy parameters for non-English languages

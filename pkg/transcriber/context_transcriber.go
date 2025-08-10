@@ -45,7 +45,29 @@ func CreateContextPrompt(previousTranscript string) string {
 		return ""
 	}
 	
-	words := strings.Fields(previousTranscript)
+	// Remove any special characters that might break command-line parsing
+	// Keep only alphanumeric, spaces, and basic punctuation
+	cleanTranscript := strings.Map(func(r rune) rune {
+		switch {
+		case r >= 'a' && r <= 'z':
+			return r
+		case r >= 'A' && r <= 'Z':
+			return r
+		case r >= '0' && r <= '9':
+			return r
+		case r == ' ' || r == '.' || r == ',' || r == '!' || r == '?':
+			return r
+		case r >= 'À' && r <= 'ÿ': // Latin extended characters (for German umlauts, etc.)
+			return r
+		default:
+			return ' ' // Replace other characters with space
+		}
+	}, previousTranscript)
+	
+	// Normalize multiple spaces to single space
+	cleanTranscript = strings.Join(strings.Fields(cleanTranscript), " ")
+	
+	words := strings.Fields(cleanTranscript)
 	if len(words) > ContextWordCount {
 		words = words[len(words)-ContextWordCount:]
 	}
