@@ -116,7 +116,7 @@ func TestTranscribeWithContextFallback(t *testing.T) {
 	audio := []byte("test audio")
 	opts := TranscribeOptions{
 		PreviousTranscript: "previous context",
-		Language:          "de",
+		Language:           "de",
 	}
 
 	// Should fall back to basic Transcribe
@@ -136,8 +136,8 @@ func TestTranscribeWithContextAware(t *testing.T) {
 	audio := []byte("test audio")
 	opts := TranscribeOptions{
 		PreviousTranscript: "previous context",
-		OverlapAudio:      []byte("overlap"),
-		Language:          "de",
+		OverlapAudio:       []byte("overlap"),
+		Language:           "de",
 	}
 
 	// Should use TranscribeWithContext
