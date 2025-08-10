@@ -1,5 +1,12 @@
 package transcriber
 
+import "strings"
+
+const (
+	// ContextWordCount is the number of words to use as context from previous transcripts
+	ContextWordCount = 30
+)
+
 // TranscribeOptions provides additional context for transcription
 type TranscribeOptions struct {
 	// PreviousTranscript provides context from the last transcription
@@ -29,4 +36,18 @@ func TranscribeWithContext(t Transcriber, audio []byte, opts TranscribeOptions) 
 	}
 	// Fallback to basic transcription without context
 	return t.Transcribe(audio)
+}
+
+// CreateContextPrompt creates a prompt from the previous transcript for whisper
+// It takes the last N words (ContextWordCount) to stay within token limits
+func CreateContextPrompt(previousTranscript string) string {
+	if previousTranscript == "" {
+		return ""
+	}
+	
+	words := strings.Fields(previousTranscript)
+	if len(words) > ContextWordCount {
+		words = words[len(words)-ContextWordCount:]
+	}
+	return strings.Join(words, " ")
 }

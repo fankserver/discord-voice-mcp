@@ -301,15 +301,21 @@ func (p *Processor) transcribeAndClear(stream *Stream, sessionManager *session.M
 	audioData := stream.Buffer.Bytes()
 	
 	// Save last 1 second of audio for overlap (48kHz * 2 channels * 2 bytes * 1 second)
-	overlapSize := 48000 * 2 * 2 * 1 // 192,000 bytes
-	if len(audioData) > overlapSize {
-		stream.overlapBuffer = make([]byte, overlapSize)
-		copy(stream.overlapBuffer, audioData[len(audioData)-overlapSize:])
-	} else {
-		// If audio is shorter than 1 second, save all of it
-		stream.overlapBuffer = make([]byte, len(audioData))
-		copy(stream.overlapBuffer, audioData)
+	overlapSize := sampleRate * channels * 2 * 1 // 192,000 bytes
+	
+	// Determine the size of the overlap to copy
+	copySize := overlapSize
+	if len(audioData) < overlapSize {
+		copySize = len(audioData)
 	}
+	
+	// Reuse buffer if capacity is sufficient to avoid re-allocation
+	if cap(stream.overlapBuffer) < copySize {
+		stream.overlapBuffer = make([]byte, copySize)
+	} else {
+		stream.overlapBuffer = stream.overlapBuffer[:copySize]
+	}
+	copy(stream.overlapBuffer, audioData[len(audioData)-copySize:])
 	
 	// Get context from previous transcript
 	lastTranscript := stream.lastTranscript

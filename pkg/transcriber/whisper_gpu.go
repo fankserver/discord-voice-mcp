@@ -208,16 +208,9 @@ func (wt *GPUWhisperTranscriber) TranscribeWithContext(audio []byte, opts Transc
 	
 	// Add context from previous transcript as initial prompt
 	// This helps maintain continuity across chunk boundaries
-	if opts.PreviousTranscript != "" {
-		// Take last 30-50 words as context (whisper has token limits)
-		words := strings.Fields(opts.PreviousTranscript)
-		contextWords := 30
-		if len(words) > contextWords {
-			words = words[len(words)-contextWords:]
-		}
-		prompt := strings.Join(words, " ")
+	if prompt := CreateContextPrompt(opts.PreviousTranscript); prompt != "" {
 		whisperArgs = append(whisperArgs, "-p", prompt)
-		logrus.WithField("prompt_words", len(words)).Debug("Using previous transcript as prompt")
+		logrus.WithField("prompt_words", len(strings.Fields(prompt))).Debug("Using previous transcript as prompt")
 	}
 	
 	// Add additional accuracy parameters for non-English languages

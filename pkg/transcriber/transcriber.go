@@ -165,15 +165,9 @@ func (wt *WhisperTranscriber) TranscribeWithContext(audio []byte, opts Transcrib
 	}
 	
 	// Add context from previous transcript as initial prompt
-	if opts.PreviousTranscript != "" {
-		words := strings.Fields(opts.PreviousTranscript)
-		contextWords := 30
-		if len(words) > contextWords {
-			words = words[len(words)-contextWords:]
-		}
-		prompt := strings.Join(words, " ")
+	if prompt := CreateContextPrompt(opts.PreviousTranscript); prompt != "" {
 		whisperArgs = append(whisperArgs, "-p", prompt)
-		logrus.WithField("prompt_words", len(words)).Debug("Using previous transcript as prompt")
+		logrus.WithField("prompt_words", len(strings.Fields(prompt))).Debug("Using previous transcript as prompt")
 	}
 	
 	whisperArgs = append(whisperArgs, "-") // Read from stdin
