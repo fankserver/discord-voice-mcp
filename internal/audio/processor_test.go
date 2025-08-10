@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/fankserver/discord-voice-mcp/internal/session"
+	"github.com/fankserver/discord-voice-mcp/pkg/transcriber"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 )
@@ -23,6 +24,24 @@ type MockTranscriber struct {
 func (m *MockTranscriber) Transcribe(audioData []byte) (string, error) {
 	args := m.Called(audioData)
 	return args.String(0), args.Error(1)
+}
+
+func (m *MockTranscriber) TranscribeWithContext(audio []byte, opts transcriber.TranscriptionOptions) (*transcriber.TranscriptResult, error) {
+	args := m.Called(audio, opts)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return &transcriber.TranscriptResult{
+		Text:       args.String(0),
+		Confidence: 0.95,
+		Language:   "en",
+		Duration:   10 * time.Millisecond,
+	}, args.Error(1)
+}
+
+func (m *MockTranscriber) IsReady() bool {
+	args := m.Called()
+	return args.Bool(0)
 }
 
 func (m *MockTranscriber) Close() error {

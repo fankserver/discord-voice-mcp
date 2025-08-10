@@ -22,7 +22,7 @@ type UserResolver interface {
 // AsyncProcessor handles audio capture and transcription asynchronously
 type AsyncProcessor struct {
 	// Core components
-	queue       *pipeline.TranscriptionQueue
+	dispatcher  *pipeline.SpeakerAwareDispatcher
 	transcriber transcriber.Transcriber
 	eventBus    *feedback.EventBus
 	
@@ -76,7 +76,7 @@ type ProcessorMetrics struct {
 	mu                sync.Mutex
 }
 
-// NewAsyncProcessor creates a new async audio processor
+// NewAsyncProcessor creates a new async audio processor optimized for Discord multi-speaker
 func NewAsyncProcessor(trans transcriber.Transcriber, config ProcessorConfig) *AsyncProcessor {
 	p := &AsyncProcessor{
 		transcriber: trans,
@@ -88,23 +88,21 @@ func NewAsyncProcessor(trans transcriber.Transcriber, config ProcessorConfig) *A
 		eventBus:    feedback.NewEventBus(config.EventBufferSize),
 	}
 	
-	// Create queue
-	queueConfig := pipeline.DefaultQueueConfig()
-	queueConfig.WorkerCount = config.WorkerCount
-	queueConfig.QueueSize = config.QueueSize
-	p.queue = pipeline.NewTranscriptionQueue(queueConfig)
-	
-	// Start queue with transcriber
-	p.queue.Start(trans)
+	// Create speaker-aware dispatcher for optimal multi-speaker Discord processing
+	dispatcherConfig := pipeline.DefaultSpeakerDispatcherConfig()
+	dispatcherConfig.WorkerCount = config.WorkerCount
+	dispatcherConfig.MaxQueueSize = config.QueueSize / 4 // Per-speaker queue size
+	p.dispatcher = pipeline.NewSpeakerAwareDispatcher(trans, dispatcherConfig)
 	
 	// Start segment router
 	p.wg.Add(1)
 	go p.routeSegments()
 	
 	logrus.WithFields(logrus.Fields{
-		"workers":    config.WorkerCount,
-		"queue_size": config.QueueSize,
-	}).Info("Async processor initialized")
+		"workers":        config.WorkerCount,
+		"max_speakers":   dispatcherConfig.MaxActiveSpeakers,
+		"queue_per_user": dispatcherConfig.MaxQueueSize,
+	}).Info("Async processor initialized with speaker-aware dispatcher")
 	
 	return p
 }
@@ -139,7 +137,7 @@ func (p *AsyncProcessor) ProcessVoiceReceive(vc *discordgo.VoiceConnection, sess
 		userID, username, nickname := userResolver.GetUserBySSRC(packet.SSRC)
 		
 		// Get or create buffer for this user
-		buffer := p.getOrCreateBuffer(packet.SSRC, userID, username, nickname, activeSessionID)
+		buffer := p.getOrCreateBuffer(packet.SSRC, userID, username, nickname, activeSessionID, sessionManager)
 		
 		// Check if this is a comfort noise packet
 		isSilence := len(packet.Opus) <= 3
@@ -195,7 +193,7 @@ func (p *AsyncProcessor) ProcessVoiceReceive(vc *discordgo.VoiceConnection, sess
 }
 
 // getOrCreateBuffer gets or creates a buffer for a user
-func (p *AsyncProcessor) getOrCreateBuffer(ssrc uint32, userID, username, nickname string, sessionID string) *SmartUserBuffer {
+func (p *AsyncProcessor) getOrCreateBuffer(ssrc uint32, userID, username, nickname string, sessionID string, sessionManager *session.Manager) *SmartUserBuffer {
 	p.mu.RLock()
 	buffer, exists := p.buffers[ssrc]
 	p.mu.RUnlock()
@@ -219,7 +217,12 @@ func (p *AsyncProcessor) getOrCreateBuffer(ssrc uint32, userID, username, nickna
 		displayName = username
 	}
 	
-	buffer = NewSmartUserBuffer(userID, displayName, ssrc, p.segmentChan, p.config.BufferConfig)
+	// Create transcription completion callback
+	onTranscriptionComplete := func(sessionID, userID, username, text string) error {
+		return sessionManager.AddTranscript(sessionID, userID, username, text)
+	}
+	
+	buffer = NewSmartUserBufferWithCallback(userID, displayName, ssrc, p.segmentChan, p.config.BufferConfig, onTranscriptionComplete)
 	buffer.SetSessionID(sessionID)
 	p.buffers[ssrc] = buffer
 	
@@ -278,7 +281,7 @@ func (p *AsyncProcessor) routeSegments() {
 						UserID:     segment.UserID,
 						Username:   segment.Username,
 						Duration:   segment.Duration,
-						QueueDepth: p.queue.GetQueueDepth(),
+						QueueDepth: int(p.dispatcher.GetMetrics().SegmentsDispatched - p.dispatcher.GetMetrics().SegmentsCompleted),
 						Priority:   int(segment.Priority),
 					})
 				},
@@ -327,12 +330,12 @@ func (p *AsyncProcessor) routeSegments() {
 				},
 			}
 			
-			// Submit to queue
-			if err := p.queue.Submit(pipelineSegment); err != nil {
+			// Dispatch to speaker-aware dispatcher
+			if err := p.dispatcher.DispatchSegment(pipelineSegment); err != nil {
 				logrus.WithError(err).WithFields(logrus.Fields{
 					"segment_id": segment.ID,
 					"user":       segment.Username,
-				}).Error("Failed to submit segment to queue")
+				}).Error("Failed to dispatch segment to speaker queue")
 			}
 			
 			// Update metrics
@@ -340,11 +343,11 @@ func (p *AsyncProcessor) routeSegments() {
 			p.metrics.SegmentsCreated++
 			p.metrics.mu.Unlock()
 			
-			// Publish queue depth event
-			metrics := p.queue.GetMetrics()
+			// Publish speaker queue metrics
+			dispatcherMetrics := p.dispatcher.GetMetrics()
 			p.eventBus.PublishQueueDepthChanged(feedback.QueueDepthData{
-				TotalDepth:    p.queue.GetQueueDepth(),
-				ActiveWorkers: int(metrics.ActiveWorkers),
+				TotalDepth:    int(dispatcherMetrics.SegmentsDispatched - dispatcherMetrics.SegmentsCompleted),
+				ActiveWorkers: int(dispatcherMetrics.ActiveSpeakers),
 			})
 			
 		case <-p.stopCh:
@@ -375,7 +378,25 @@ func (p *AsyncProcessor) GetMetrics() ProcessorMetrics {
 
 // GetQueueMetrics returns queue metrics
 func (p *AsyncProcessor) GetQueueMetrics() pipeline.QueueMetrics {
-	return p.queue.GetMetrics()
+	// Return dispatcher metrics in compatible format
+	dispatcherMetrics := p.dispatcher.GetMetrics()
+	return struct {
+		SegmentsQueued     int64
+		SegmentsProcessed  int64
+		SegmentsFailed     int64
+		TotalProcessTime   int64
+		AverageProcessTime int64
+		CurrentQueueDepth  int32
+		ActiveWorkers      int32
+	}{
+		SegmentsQueued:     dispatcherMetrics.SegmentsDispatched,
+		SegmentsProcessed:  dispatcherMetrics.SegmentsCompleted,
+		SegmentsFailed:     dispatcherMetrics.SegmentsDropped,
+		TotalProcessTime:   0, // Not tracked by dispatcher
+		AverageProcessTime: dispatcherMetrics.AverageLatency,
+		CurrentQueueDepth:  int32(dispatcherMetrics.SegmentsDispatched - dispatcherMetrics.SegmentsCompleted),
+		ActiveWorkers:      dispatcherMetrics.ActiveSpeakers,
+	}
 }
 
 // GetBufferStatuses returns status of all active buffers
@@ -402,7 +423,7 @@ func (p *AsyncProcessor) Stop() {
 	p.wg.Wait()
 	
 	// Stop the queue
-	p.queue.Stop()
+	p.dispatcher.Stop()
 	
 	// Stop event bus
 	p.eventBus.Stop()

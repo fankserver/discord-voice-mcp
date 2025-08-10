@@ -131,12 +131,29 @@ func (m *Manager) RemovePendingTranscription(sessionID, userID string) error {
 
 // AddTranscript adds a transcript to a session
 func (m *Manager) AddTranscript(sessionID, userID, username, text string) error {
+	logrus.WithFields(logrus.Fields{
+		"session_id": sessionID,
+		"user_id":    userID,
+		"username":   username,
+		"text":       text,
+		"text_len":   len(text),
+	}).Debug("AddTranscript called")
+
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
 	session, exists := m.sessions[sessionID]
 	if !exists {
-		logrus.WithField("session_id", sessionID).Error("Session not found for transcript")
+		logrus.WithFields(logrus.Fields{
+			"session_id":        sessionID,
+			"available_sessions": func() []string {
+				var keys []string
+				for k := range m.sessions {
+					keys = append(keys, k)
+				}
+				return keys
+			}(),
+		}).Error("Session not found for transcript")
 		return fmt.Errorf("session %s not found", sessionID)
 	}
 
@@ -148,6 +165,14 @@ func (m *Manager) AddTranscript(sessionID, userID, username, text string) error 
 	}
 
 	session.Transcripts = append(session.Transcripts, transcript)
+	
+	logrus.WithFields(logrus.Fields{
+		"session_id":     sessionID,
+		"user_id":        userID,
+		"username":       username,
+		"text":           text,
+		"total_transcripts": len(session.Transcripts),
+	}).Info("Transcript added to session successfully")
 
 	// Remove any pending transcription for this user
 	filtered := make([]PendingTranscription, 0, len(session.PendingTranscriptions))

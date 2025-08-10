@@ -136,11 +136,15 @@ func NewGPUWhisperTranscriber(modelPath string) (*GPUWhisperTranscriber, error) 
 
 // Transcribe uses whisper.cpp CLI with optional GPU acceleration
 func (wt *GPUWhisperTranscriber) Transcribe(audio []byte) (string, error) {
-	return wt.TranscribeWithContext(audio, TranscribeOptions{})
+	result, err := wt.TranscribeWithContext(audio, TranscriptionOptions{})
+	if err != nil {
+		return "", err
+	}
+	return result.Text, nil
 }
 
 // TranscribeWithContext uses whisper.cpp CLI with context for better accuracy
-func (wt *GPUWhisperTranscriber) TranscribeWithContext(audio []byte, opts TranscribeOptions) (string, error) {
+func (wt *GPUWhisperTranscriber) TranscribeWithContext(audio []byte, opts TranscriptionOptions) (*TranscriptResult, error) {
 	startTime := time.Now()
 
 	// Use only the current audio chunk without overlap
@@ -159,7 +163,7 @@ func (wt *GPUWhisperTranscriber) TranscribeWithContext(audio []byte, opts Transc
 		"model":             wt.modelPath,
 		"gpu":               wt.useGPU,
 		"gpu_layers":        wt.gpuLayers,
-		"has_context":       opts.PreviousTranscript != "",
+		"has_context":       opts.PreviousContext != "",
 	}).Debug("GPUWhisperTranscriber: Starting transcription")
 
 	// Convert PCM to WAV format using ffmpeg
@@ -186,7 +190,7 @@ func (wt *GPUWhisperTranscriber) TranscribeWithContext(audio []byte, opts Transc
 			"error":  err,
 			"stderr": ffmpegErr.String(),
 		}).Error("Failed to convert audio to WAV")
-		return "", fmt.Errorf("audio conversion failed: %w", err)
+		return nil, fmt.Errorf("audio conversion failed: %w", err)
 	}
 
 	logrus.WithFields(logrus.Fields{
@@ -209,7 +213,7 @@ func (wt *GPUWhisperTranscriber) TranscribeWithContext(audio []byte, opts Transc
 	// This helps maintain continuity across chunk boundaries
 	// IMPORTANT: Use --prompt (not -p) for text prompts
 	// The -p flag expects an integer for parallel processing
-	if prompt := CreateContextPrompt(opts.PreviousTranscript); prompt != "" {
+	if prompt := CreateContextPrompt(opts.PreviousContext); prompt != "" {
 		// Log the exact prompt for debugging
 		logrus.WithFields(logrus.Fields{
 			"prompt":       prompt,
@@ -264,7 +268,7 @@ func (wt *GPUWhisperTranscriber) TranscribeWithContext(audio []byte, opts Transc
 			"error":  err,
 			"stderr": errBuf.String(),
 		}).Error("Whisper transcription failed")
-		return "", fmt.Errorf("whisper transcription failed: %w", err)
+		return nil, fmt.Errorf("whisper transcription failed: %w", err)
 	}
 
 	// Log stderr output for debugging (includes model loading and performance info)
@@ -274,16 +278,22 @@ func (wt *GPUWhisperTranscriber) TranscribeWithContext(audio []byte, opts Transc
 
 	// Clean up the output
 	transcript := string(bytes.TrimSpace(outBuf.Bytes()))
+	duration := time.Since(startTime)
+	
 	if transcript == "" {
 		logrus.WithFields(logrus.Fields{
 			"audio_duration_ms": len(audio) * 1000 / 192000,
 			"stderr_len":        errBuf.Len(),
 		}).Debug("GPUWhisperTranscriber: No speech detected")
-		return "[No speech detected]", nil
+		return &TranscriptResult{
+			Text:       "[No speech detected]",
+			Confidence: 0.0,
+			Language:   wt.language,
+			Duration:   duration,
+		}, nil
 	}
 
 	// Log performance metrics
-	duration := time.Since(startTime)
 	// 48kHz stereo 16-bit = 48000 samples/sec * 2 channels * 2 bytes/sample = 192000 bytes/sec
 	audioDuration := time.Duration(len(audio)/192000) * time.Second
 	rtf := float64(duration) / float64(audioDuration)
@@ -296,7 +306,27 @@ func (wt *GPUWhisperTranscriber) TranscribeWithContext(audio []byte, opts Transc
 		"gpu":               wt.useGPU,
 	}).Info("GPUWhisperTranscriber: Transcription complete")
 
-	return transcript, nil
+	return &TranscriptResult{
+		Text:       transcript,
+		Confidence: 1.0, // Whisper doesn't provide confidence scores
+		Language:   wt.language,
+		Duration:   duration,
+	}, nil
+}
+
+// IsReady returns true if the transcriber is ready to process audio
+func (wt *GPUWhisperTranscriber) IsReady() bool {
+	// Check that all required paths are still valid
+	if _, err := os.Stat(wt.modelPath); err != nil {
+		return false
+	}
+	if _, err := exec.LookPath("whisper"); err != nil {
+		return false
+	}
+	if _, err := exec.LookPath("ffmpeg"); err != nil {
+		return false
+	}
+	return true
 }
 
 func (wt *GPUWhisperTranscriber) Close() error {
