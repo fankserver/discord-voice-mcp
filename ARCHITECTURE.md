@@ -8,14 +8,14 @@ This document explains the architecture-specific optimizations implemented in th
 
 The Dockerfile.whisper uses different base images depending on the target architecture:
 
-- **AMD64 (x86_64)**: Uses `nvidia/cuda:12.2.0-runtime-ubuntu22.04` 
+- **AMD64 (x86_64)**: Uses `nvidia/cuda:12.2.0-base-ubuntu22.04` 
 - **ARM64 (aarch64)**: Uses `ubuntu:22.04`
 
 This is achieved through Docker's multi-stage build feature with architecture selection:
 
 ```dockerfile
 ARG TARGETARCH
-FROM nvidia/cuda:12.2.0-runtime-ubuntu22.04 AS base-amd64
+FROM nvidia/cuda:12.2.0-base-ubuntu22.04 AS base-amd64
 FROM ubuntu:22.04 AS base-arm64
 FROM base-${TARGETARCH} AS final
 ```

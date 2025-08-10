@@ -305,22 +305,14 @@ The Whisper Docker image includes automatic GPU detection and acceleration:
 ### Building with Custom GPU Support
 
 ```bash
-# Build with all GPU backends (default)
+# Build universal GPU support (Vulkan - works on ALL GPUs)
 docker build -f Dockerfile.whisper -t discord-voice-mcp:whisper .
 
-# Build with CUDA only
-docker build -f Dockerfile.whisper \
-  --build-arg GGML_CUDA=ON \
-  --build-arg GGML_ROCM=OFF \
-  --build-arg GGML_VULKAN=OFF \
-  -t discord-voice-mcp:cuda .
+# Build NVIDIA-optimized version (CUDA - maximum performance)
+docker build -f Dockerfile.whisper-cuda -t discord-voice-mcp:whisper-cuda .
 
-# Build CPU-only (smallest image)
-docker build -f Dockerfile.whisper \
-  --build-arg GGML_CUDA=OFF \
-  --build-arg GGML_ROCM=OFF \
-  --build-arg GGML_VULKAN=OFF \
-  -t discord-voice-mcp:cpu .
+# Build standard version (no GPU acceleration)
+docker build -f Dockerfile -t discord-voice-mcp:latest .
 ```
 
 ## ⚙️ Audio Processing Configuration
