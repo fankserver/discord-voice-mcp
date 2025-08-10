@@ -5,6 +5,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/sirupsen/logrus"
 )
 
@@ -98,9 +99,10 @@ func (b *AudioBuffer) Reset() {
 // SmartUserBuffer implements dual-buffer system for non-blocking audio processing
 type SmartUserBuffer struct {
 	// User identification
-	userID   string
-	username string
-	ssrc     uint32
+	userID    string
+	username  string
+	ssrc      uint32
+	sessionID string // Added for event correlation
 	
 	// Dual buffer system
 	activeBuffer     *AudioBuffer
@@ -172,6 +174,13 @@ func NewSmartUserBuffer(userID, username string, ssrc uint32, outputChan chan<- 
 	}
 }
 
+// SetSessionID sets the session ID for event correlation
+func (b *SmartUserBuffer) SetSessionID(sessionID string) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.sessionID = sessionID
+}
+
 // ProcessAudio handles incoming audio with intelligent buffering
 func (b *SmartUserBuffer) ProcessAudio(pcm []byte, isSpeech bool) {
 	b.mu.Lock()
@@ -219,6 +228,8 @@ func (b *SmartUserBuffer) triggerTranscription(decision TranscribeDecision) {
 	
 	// Create segment for processing
 	segment := &AudioSegment{
+		ID:          uuid.New().String(),
+		SessionID:   b.sessionID,
 		UserID:      b.userID,
 		Username:    b.username,
 		SSRC:        b.ssrc,
