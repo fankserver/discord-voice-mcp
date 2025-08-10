@@ -57,14 +57,13 @@ func NewGPUWhisperTranscriber(modelPath string) (*GPUWhisperTranscriber, error) 
 		useGPU = true
 
 		// Get number of layers to offload to GPU
-		if layers := os.Getenv("WHISPER_GPU_LAYERS"); layers != "" {
-			if l, err := strconv.Atoi(layers); err == nil {
+		gpuLayers = 32 // Default for most models
+		if layersStr := os.Getenv("WHISPER_GPU_LAYERS"); layersStr != "" {
+			if l, err := strconv.Atoi(layersStr); err == nil {
 				gpuLayers = l
 			} else {
-				gpuLayers = 32 // Default for most models
+				logrus.WithError(err).WithField("value", layersStr).Warn("Invalid WHISPER_GPU_LAYERS value, using default")
 			}
-		} else {
-			gpuLayers = 32 // Default
 		}
 
 		logrus.WithFields(logrus.Fields{
