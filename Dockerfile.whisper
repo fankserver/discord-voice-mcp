@@ -21,6 +21,7 @@ RUN CGO_ENABLED=1 go build -ldflags '-w -s' \
     -o discord-voice-mcp ./cmd/discord-voice-mcp
 
 # For AMD64: Use Vulkan-enabled image (works on ALL GPUs)
+# hadolint ignore=DL3007
 FROM ghcr.io/kth8/whisper-server-vulkan:latest AS whisper-amd64
 
 # For ARM64: Build from source (Vulkan support for ARM GPUs)
