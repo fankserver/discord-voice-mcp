@@ -30,10 +30,10 @@ const (
 	// Default values (can be overridden by environment variables)
 	// Note: For better transcription accuracy, especially with non-English languages,
 	// consider increasing buffer duration to 5-10 seconds to maintain sentence context
-	defaultBufferDurationSec = 2    // Default buffer duration in seconds
-	defaultSilenceTimeoutMs  = 1500 // Default silence timeout in milliseconds
+	defaultBufferDurationSec = 5    // Increased to 5 seconds for better sentence context
+	defaultSilenceTimeoutMs  = 2000 // Increased to 2 seconds for more natural pauses
 	defaultMinAudioMs        = 100  // Default minimum audio in milliseconds
-	defaultOverlapMs         = 200  // Default overlap duration in milliseconds
+	defaultOverlapMs         = 0    // Disabled - causes duplicate transcriptions without working prompt feature
 )
 
 // Configurable variables (set from environment or defaults)

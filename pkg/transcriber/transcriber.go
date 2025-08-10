@@ -106,9 +106,11 @@ func (wt *WhisperTranscriber) Transcribe(audio []byte) (string, error) {
 
 // TranscribeWithContext uses whisper.cpp CLI with context for better accuracy
 func (wt *WhisperTranscriber) TranscribeWithContext(audio []byte, opts TranscribeOptions) (string, error) {
-	// Combine overlap audio with current audio if provided
+	// DISABLED: Audio overlap causes duplicate transcriptions
+	// Since the whisper prompt feature is broken (causes stoi crash),
+	// we cannot use audio overlap as it gets transcribed twice.
 	finalAudio := audio
-	if len(opts.OverlapAudio) > 0 {
+	if false && len(opts.OverlapAudio) > 0 {
 		finalAudio = append(opts.OverlapAudio, audio...)
 		logrus.WithFields(logrus.Fields{
 			"overlap_bytes": len(opts.OverlapAudio),
