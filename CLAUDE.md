@@ -36,10 +36,11 @@ pkg/transcriber/         # Public transcriber interface (Whisper/Google/Mock)
    - User-centric tools for joining configured user's channel and auto-following
    - Returns structured `CallToolResultFor[T]` responses
 
-2. **Audio Pipeline (`internal/audio/processor.go`)**
+2. **Audio Pipeline (`internal/audio/processor.go`, `internal/audio/vad.go`)**
    - Decodes Opus packets to PCM using gopus
+   - Voice Activity Detection (VAD) for accurate speech detection
    - Buffers audio per user (SSRC-based identification)
-   - Triggers transcription at 2-second buffer threshold
+   - Triggers transcription at 3-second buffer threshold
    - Constants: 48kHz sample rate, 2 channels, 960 frame size
 
 3. **Discord Bot (`internal/bot/bot.go`)**
@@ -122,11 +123,15 @@ CGO_ENABLED=1 go build -a -tags netgo -ldflags '-w -s -extldflags "-static"'
 ### Audio Processing Flow
 1. Discord sends Opus packets via `VoiceConnection.OpusRecv` channel
 2. Processor decodes to PCM (48kHz, stereo)
-3. PCM buffered per user with two trigger conditions:
-   - Buffer reaches configured duration (default: 2 seconds)
+3. **Voice Activity Detection (VAD)** analyzes PCM audio:
+   - Energy-based detection with adaptive noise floor
+   - Zero-crossing rate analysis to filter noise
+   - Hysteresis to prevent rapid state switching
+4. PCM buffered per user with two trigger conditions:
+   - Buffer reaches configured duration (default: 3 seconds)
    - Silence detected for configured timeout (default: 1.5 seconds)
-4. Transcriber called with accumulated audio
-5. Transcript added to session with timestamp
+5. Transcriber called with accumulated audio
+6. Transcript added to session with timestamp
 
 ### Audio Configuration
 Configurable via environment variables:

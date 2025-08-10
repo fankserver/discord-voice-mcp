@@ -35,6 +35,11 @@ const (
 	defaultMinAudioMs           = 100  // Default minimum audio in milliseconds
 	defaultOverlapMs            = 0    // Disabled - audio overlap not needed with prompt context
 	defaultContextExpirationSec = 10   // Clear context after 10 seconds of no activity
+	
+	// VAD defaults
+	defaultVADEnergyThreshold   = 0.01  // Energy threshold for voice detection
+	defaultVADSpeechFrames      = 3     // Frames needed to confirm speech (60ms)
+	defaultVADSilenceFrames     = 15    // Frames needed to confirm silence (300ms)
 )
 
 // Configurable variables (set from environment or defaults)
@@ -133,6 +138,10 @@ type Stream struct {
 	lastTranscript     string    // Last successful transcript for context
 	lastTranscriptTime time.Time // When the last transcript was created
 	overlapBuffer      []byte    // Last 1 second of audio for overlap
+	
+	// Voice Activity Detection
+	vad            *VoiceActivityDetector // VAD instance for this user
+	decoderBuffer  []byte                 // Buffer for decoder output reuse
 }
 
 // NewProcessor creates a new audio processor
@@ -163,64 +172,84 @@ func (p *Processor) ProcessVoiceReceive(vc *discordgo.VoiceConnection, sessionMa
 		}
 
 		// Log packet details
-		isSilence := len(packet.Opus) <= 3
+		isSilencePacket := len(packet.Opus) <= 3
 		logrus.WithFields(logrus.Fields{
-			"ssrc":       packet.SSRC,
-			"opus_len":   len(packet.Opus),
-			"timestamp":  packet.Timestamp,
-			"packet_num": packetCount,
-			"is_silence": isSilence,
+			"ssrc":            packet.SSRC,
+			"opus_len":        len(packet.Opus),
+			"timestamp":       packet.Timestamp,
+			"packet_num":      packetCount,
+			"is_silence_pkt":  isSilencePacket,
 		}).Debug("Received voice packet")
 
 		// Get or create stream for user
 		userID, username, nickname := userResolver.GetUserBySSRC(packet.SSRC)
 		stream := p.getOrCreateStream(packet.SSRC, userID, username, nickname, sessionManager, activeSessionID)
 
-		// Handle silence packets
-		if isSilence {
-			// Silence packet detected - start/continue silence timer
-			stream.mu.Lock()
-			bufferSize := stream.Buffer.Len()
-			stream.mu.Unlock()
-
-			if bufferSize > minAudioBuffer {
-				// We have audio in the buffer, start silence timer if not already running
-				stream.startSilenceTimer(p, sessionManager, activeSessionID)
+		// Process all packets through VAD (even silence packets)
+		var pcmBytes []byte
+		
+		if isSilencePacket {
+			// Generate comfort noise for silence packets
+			// Discord sends these to maintain connection when user is not speaking
+			pcmBytes = make([]byte, frameSize*channels*2)
+			// Fill with very low amplitude noise (near zero)
+			for i := range pcmBytes {
+				pcmBytes[i] = 0
 			}
-			continue
+		} else {
+			// Decode opus to PCM (real audio)
+			pcm, err := decoder.Decode(packet.Opus, frameSize, false)
+			if err != nil {
+				logrus.WithError(err).Debug("Error decoding opus")
+				continue
+			}
+
+			logrus.WithFields(logrus.Fields{
+				"pcm_samples": len(pcm),
+				"ssrc":        packet.SSRC,
+			}).Debug("Decoded opus to PCM")
+
+			// Convert PCM to bytes (reuse buffer to reduce allocations)
+			if len(stream.decoderBuffer) < len(pcm)*2 {
+				stream.decoderBuffer = make([]byte, len(pcm)*2)
+			}
+			pcmBytes = stream.decoderBuffer[:len(pcm)*2]
+			for i := 0; i < len(pcm); i++ {
+				// Safe conversion from int16 to uint16 for binary encoding
+				// #nosec G115 - This is safe as we're reinterpreting the bits, not converting the value
+				binary.LittleEndian.PutUint16(pcmBytes[i*2:], uint16(pcm[i]))
+			}
 		}
 
-		// Decode opus to PCM (real audio)
-		pcm, err := decoder.Decode(packet.Opus, frameSize, false)
-		if err != nil {
-			logrus.WithError(err).Debug("Error decoding opus")
-			continue
-		}
-
-		logrus.WithFields(logrus.Fields{
-			"pcm_samples": len(pcm),
-			"ssrc":        packet.SSRC,
-		}).Debug("Decoded opus to PCM")
-
-		// Convert PCM to bytes
-		pcmBytes := make([]byte, len(pcm)*2) // samples * 2 bytes per sample
-		for i := 0; i < len(pcm); i++ {
-			// Safe conversion from int16 to uint16 for binary encoding
-			// #nosec G115 - This is safe as we're reinterpreting the bits, not converting the value
-			binary.LittleEndian.PutUint16(pcmBytes[i*2:], uint16(pcm[i]))
-		}
-
-		// Add to buffer and update audio timing
+		// Run VAD on the PCM data
+		isSpeaking := stream.vad.DetectVoiceActivity(pcmBytes)
+		
+		// Handle voice activity state changes
 		stream.mu.Lock()
-		stream.Buffer.Write(pcmBytes)
-		bufferSize := stream.Buffer.Len()
-		stream.lastAudioTime = time.Now()
-
-		// Cancel silence timer since we got real audio
-		if stream.silenceTimer != nil {
-			stream.silenceTimer.Stop()
-			stream.silenceTimer = nil
+		
+		if isSpeaking {
+			// Voice detected - add to buffer
+			stream.Buffer.Write(pcmBytes)
+			stream.lastAudioTime = time.Now()
+			
+			// Cancel silence timer since we're speaking
+			if stream.silenceTimer != nil {
+				stream.silenceTimer.Stop()
+				stream.silenceTimer = nil
+			}
+		} else {
+			// No voice detected
+			bufferSize := stream.Buffer.Len()
+			
+			if bufferSize > minAudioBuffer && stream.silenceTimer == nil {
+				// We have audio in buffer and voice stopped - start silence timer
+				stream.mu.Unlock()
+				stream.startSilenceTimer(p, sessionManager, activeSessionID)
+				stream.mu.Lock()
+			}
 		}
+		
+		bufferSize := stream.Buffer.Len()
 		stream.mu.Unlock()
 
 		logrus.WithFields(logrus.Fields{
@@ -263,6 +292,8 @@ func (p *Processor) getOrCreateStream(ssrc uint32, userID, username, nickname st
 		Username:      nickname, // Use nickname as display name
 		Buffer:        new(bytes.Buffer),
 		lastAudioTime: time.Now(),
+		vad:           NewVoiceActivityDetector(),
+		decoderBuffer: make([]byte, frameSize*channels*2), // Pre-allocate decoder buffer
 	}
 	p.activeStreams[streamID] = stream
 	logrus.WithFields(logrus.Fields{
