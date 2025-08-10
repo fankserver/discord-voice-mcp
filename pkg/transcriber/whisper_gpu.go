@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"runtime"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/sirupsen/logrus"
@@ -135,14 +136,31 @@ func NewGPUWhisperTranscriber(modelPath string) (*GPUWhisperTranscriber, error) 
 
 // Transcribe uses whisper.cpp CLI with optional GPU acceleration
 func (wt *GPUWhisperTranscriber) Transcribe(audio []byte) (string, error) {
+	return wt.TranscribeWithContext(audio, TranscribeOptions{})
+}
+
+// TranscribeWithContext uses whisper.cpp CLI with context for better accuracy
+func (wt *GPUWhisperTranscriber) TranscribeWithContext(audio []byte, opts TranscribeOptions) (string, error) {
 	startTime := time.Now()
+	
+	// Combine overlap audio with current audio if provided
+	finalAudio := audio
+	if len(opts.OverlapAudio) > 0 {
+		// Prepend overlap audio to maintain continuity
+		finalAudio = append(opts.OverlapAudio, audio...)
+		logrus.WithFields(logrus.Fields{
+			"overlap_bytes": len(opts.OverlapAudio),
+			"total_bytes":   len(finalAudio),
+		}).Debug("Using overlap audio for context")
+	}
 
 	logrus.WithFields(logrus.Fields{
-		"audio_bytes":       len(audio),
-		"audio_duration_ms": len(audio) * 1000 / 192000,
+		"audio_bytes":       len(finalAudio),
+		"audio_duration_ms": len(finalAudio) * 1000 / 192000,
 		"model":             wt.modelPath,
 		"gpu":               wt.useGPU,
 		"gpu_layers":        wt.gpuLayers,
+		"has_context":       opts.PreviousTranscript != "",
 	}).Debug("GPUWhisperTranscriber: Starting transcription")
 
 	// Convert PCM to WAV format using ffmpeg
@@ -157,7 +175,7 @@ func (wt *GPUWhisperTranscriber) Transcribe(audio []byte) (string, error) {
 		"-f", "wav",
 		"-",
 	)
-	cmd.Stdin = bytes.NewReader(audio)
+	cmd.Stdin = bytes.NewReader(finalAudio)
 
 	var wavBuf bytes.Buffer
 	var ffmpegErr bytes.Buffer
@@ -186,6 +204,20 @@ func (wt *GPUWhisperTranscriber) Transcribe(audio []byte) (string, error) {
 		"-bs", wt.beamSize,
 		"--no-timestamps",
 		"-otxt",
+	}
+	
+	// Add context from previous transcript as initial prompt
+	// This helps maintain continuity across chunk boundaries
+	if opts.PreviousTranscript != "" {
+		// Take last 30-50 words as context (whisper has token limits)
+		words := strings.Fields(opts.PreviousTranscript)
+		contextWords := 30
+		if len(words) > contextWords {
+			words = words[len(words)-contextWords:]
+		}
+		prompt := strings.Join(words, " ")
+		whisperArgs = append(whisperArgs, "-p", prompt)
+		logrus.WithField("prompt_words", len(words)).Debug("Using previous transcript as prompt")
 	}
 	
 	// Add additional accuracy parameters for non-English languages

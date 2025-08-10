@@ -104,6 +104,10 @@ type Stream struct {
 	silenceTimer   *time.Timer // Timer for detecting silence
 	lastAudioTime  time.Time   // Last time we received real audio (not silence)
 	isTranscribing bool        // Prevent concurrent transcriptions
+	
+	// Context preservation for better transcription accuracy
+	lastTranscript string      // Last successful transcript for context
+	overlapBuffer  []byte      // Last 1 second of audio for overlap
 }
 
 // NewProcessor creates a new audio processor
@@ -295,6 +299,21 @@ func (p *Processor) transcribeAndClear(stream *Stream, sessionManager *session.M
 	}
 
 	audioData := stream.Buffer.Bytes()
+	
+	// Save last 1 second of audio for overlap (48kHz * 2 channels * 2 bytes * 1 second)
+	overlapSize := 48000 * 2 * 2 * 1 // 192,000 bytes
+	if len(audioData) > overlapSize {
+		stream.overlapBuffer = make([]byte, overlapSize)
+		copy(stream.overlapBuffer, audioData[len(audioData)-overlapSize:])
+	} else {
+		// If audio is shorter than 1 second, save all of it
+		stream.overlapBuffer = make([]byte, len(audioData))
+		copy(stream.overlapBuffer, audioData)
+	}
+	
+	// Get context from previous transcript
+	lastTranscript := stream.lastTranscript
+	
 	stream.Buffer.Reset()
 	stream.mu.Unlock()
 
@@ -333,10 +352,14 @@ func (p *Processor) transcribeAndClear(stream *Stream, sessionManager *session.M
 		"duration_sec": audioDuration,
 		"user":         stream.UserID,
 		"session":      sessionID,
+		"has_context":  lastTranscript != "",
 	}).Info("Starting transcription")
 
-	// Transcribe audio
-	text, err := p.transcriber.Transcribe(audioData)
+	// Transcribe audio with context for better accuracy
+	text, err := transcriber.TranscribeWithContext(p.transcriber, audioData, transcriber.TranscribeOptions{
+		PreviousTranscript: lastTranscript,
+		OverlapAudio:       stream.overlapBuffer,
+	})
 	if err != nil {
 		logrus.WithError(err).Error("Error transcribing audio")
 		return
@@ -348,6 +371,11 @@ func (p *Processor) transcribeAndClear(stream *Stream, sessionManager *session.M
 	}).Debug("Transcription completed")
 
 	if text != "" {
+		// Save transcript for context in next chunk
+		stream.mu.Lock()
+		stream.lastTranscript = text
+		stream.mu.Unlock()
+		
 		// Add to session (this will also remove the pending transcription)
 		err = sessionManager.AddTranscript(sessionID, stream.UserID, stream.Username, text)
 		if err != nil {
