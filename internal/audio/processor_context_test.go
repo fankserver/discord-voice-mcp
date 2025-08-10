@@ -45,6 +45,7 @@ func TestContextPreservation(t *testing.T) {
 		Buffer:             bytes.NewBuffer(make([]byte, 1000)),
 		lastTranscript:     "",
 		lastTranscriptTime: time.Now(),
+		vad:                NewVoiceActivityDetector(),
 	}
 
 	// First transcription - no context
@@ -91,6 +92,7 @@ func TestContextExpiration(t *testing.T) {
 		Buffer:             bytes.NewBuffer(make([]byte, 1000)),
 		lastTranscript:     "Old context",
 		lastTranscriptTime: time.Now().Add(-200 * time.Millisecond), // Expired
+		vad:                NewVoiceActivityDetector(),
 	}
 
 	// Should NOT use expired context
@@ -125,6 +127,7 @@ func TestContextNotExpired(t *testing.T) {
 		Buffer:             bytes.NewBuffer(make([]byte, 1000)),
 		lastTranscript:     "Recent context",
 		lastTranscriptTime: time.Now().Add(-1 * time.Second), // Not expired
+		vad:                NewVoiceActivityDetector(),
 	}
 
 	// Should use recent context
@@ -151,6 +154,7 @@ func TestMultiUserContextIsolation(t *testing.T) {
 		Buffer:             bytes.NewBuffer(make([]byte, 1000)),
 		lastTranscript:     "User 1 context",
 		lastTranscriptTime: time.Now(),
+		vad:                NewVoiceActivityDetector(),
 	}
 
 	stream2 := &Stream{
@@ -159,6 +163,7 @@ func TestMultiUserContextIsolation(t *testing.T) {
 		Buffer:             bytes.NewBuffer(make([]byte, 1000)),
 		lastTranscript:     "User 2 context",
 		lastTranscriptTime: time.Now(),
+		vad:                NewVoiceActivityDetector(),
 	}
 
 	processor.activeStreams["stream-1"] = stream1
@@ -202,6 +207,7 @@ func TestOverlapBufferManagement(t *testing.T) {
 		Username:      "TestUser",
 		Buffer:        bytes.NewBuffer(make([]byte, audioSize)),
 		overlapBuffer: nil,
+		vad:           NewVoiceActivityDetector(),
 	}
 
 	// First transcription - should create overlap buffer
@@ -233,6 +239,7 @@ func TestContextTimestampUpdate(t *testing.T) {
 		Buffer:             bytes.NewBuffer(make([]byte, 1000)),
 		lastTranscript:     "Old",
 		lastTranscriptTime: oldTime,
+		vad:                NewVoiceActivityDetector(),
 	}
 
 	mockTranscriber.On("TranscribeWithContext", mock.Anything, mock.Anything).Return("New", nil).Once()
@@ -265,6 +272,7 @@ func TestEmptyTranscriptNoContextUpdate(t *testing.T) {
 		Buffer:             bytes.NewBuffer(make([]byte, 1000)),
 		lastTranscript:     originalContext,
 		lastTranscriptTime: originalTime,
+		vad:                NewVoiceActivityDetector(),
 	}
 
 	// Return empty transcript
@@ -300,6 +308,7 @@ func BenchmarkTranscribeWithContext(b *testing.B) {
 		Buffer:             bytes.NewBuffer(make([]byte, 1000)),
 		lastTranscript:     "Previous context for benchmarking",
 		lastTranscriptTime: time.Now(),
+		vad:                NewVoiceActivityDetector(),
 	}
 
 	// Setup mock to return quickly
@@ -327,6 +336,7 @@ func TestRaceConditionContextUpdate(t *testing.T) {
 		UserID:   "test-user",
 		Username: "TestUser",
 		Buffer:   new(bytes.Buffer),
+		vad:      NewVoiceActivityDetector(),
 	}
 
 	// Setup mock to handle concurrent calls

@@ -82,6 +82,7 @@ func TestProcessorBufferThreshold(t *testing.T) {
 				UserID:   "test-user",
 				Username: "TestUser",
 				Buffer:   bytes.NewBuffer(make([]byte, tt.bufferSize)),
+				vad:      NewVoiceActivityDetector(),
 			}
 			processor.activeStreams["test-stream"] = stream
 
@@ -126,6 +127,7 @@ func TestProcessorBufferGrowthAndReset(t *testing.T) {
 		UserID:   "test-user",
 		Username: "TestUser",
 		Buffer:   new(bytes.Buffer),
+		vad:      NewVoiceActivityDetector(),
 	}
 	processor.activeStreams["test-stream"] = stream
 
@@ -238,6 +240,7 @@ func TestTranscribeAndClearEmptyBuffer(t *testing.T) {
 		UserID:   "test-user",
 		Username: "TestUser",
 		Buffer:   new(bytes.Buffer),
+		vad:      NewVoiceActivityDetector(),
 	}
 
 	// Should not call transcriber for empty buffer
@@ -257,6 +260,7 @@ func TestTranscribeAndClearAddsToSession(t *testing.T) {
 		UserID:   "test-user",
 		Username: "TestUser",
 		Buffer:   bytes.NewBuffer(make([]byte, 1000)),
+		vad:      NewVoiceActivityDetector(),
 	}
 
 	expectedText := "Hello, this is a test transcription"
@@ -286,6 +290,7 @@ func BenchmarkProcessorBufferOperations(b *testing.B) {
 		UserID:   "bench-user",
 		Username: "BenchUser",
 		Buffer:   new(bytes.Buffer),
+		vad:      NewVoiceActivityDetector(),
 	}
 
 	// Create sample PCM data (one packet)
@@ -324,87 +329,69 @@ func TestPCMConversion(t *testing.T) {
 	assert.Equal(t, pcmSamples, recovered, "PCM conversion should be lossless")
 }
 
-// TestSilenceDetection tests the silence timer functionality
-func TestSilenceDetection(t *testing.T) {
-	// Set a short silence timeout for testing
-	oldTimeout := silenceTimeout
-	silenceTimeout = 100 * time.Millisecond
-	defer func() { silenceTimeout = oldTimeout }()
-
+// TestVADSilenceDetection tests VAD-based silence detection
+func TestVADSilenceDetection(t *testing.T) {
 	mockTranscriber := new(MockTranscriber)
-	processor := NewProcessor(mockTranscriber)
-	sessionManager := session.NewManager()
-	sessionID := sessionManager.CreateSession("test-guild", "test-channel")
+	_ = NewProcessor(mockTranscriber)
+	_ = session.NewManager()
+	_ = session.NewManager().CreateSession("test-guild", "test-channel")
 
-	// Create a stream with some audio data
-	stream := &Stream{
-		UserID:   "test-user",
-		Username: "TestUser",
-		Buffer:   bytes.NewBuffer(make([]byte, minAudioBuffer+100)), // Just above minimum
-	}
-
-	// Set up mock expectation for transcription
-	mockTranscriber.On("Transcribe", mock.Anything).Return("silence detected transcript", nil).Once()
-
-	// Start silence timer
-	stream.startSilenceTimer(processor, sessionManager, sessionID)
-
-	// Wait for silence timeout to trigger
-	time.Sleep(150 * time.Millisecond)
-
-	// Verify transcription was called
-	mockTranscriber.AssertExpectations(t)
-
-	// Buffer should be cleared
-	assert.Equal(t, 0, stream.Buffer.Len(), "Buffer should be cleared after silence detection")
-}
-
-// TestSilenceTimerCancellation tests that silence timer is cancelled when new audio arrives
-func TestSilenceTimerCancellation(t *testing.T) {
-	// Set a short silence timeout for testing
-	oldTimeout := silenceTimeout
-	silenceTimeout = 100 * time.Millisecond
-	defer func() { silenceTimeout = oldTimeout }()
-
-	mockTranscriber := new(MockTranscriber)
-	processor := NewProcessor(mockTranscriber)
-	sessionManager := session.NewManager()
-	sessionID := sessionManager.CreateSession("test-guild", "test-channel")
-
-	// Create a stream with some audio data
+	// Create a stream with VAD
 	stream := &Stream{
 		UserID:   "test-user",
 		Username: "TestUser",
 		Buffer:   bytes.NewBuffer(make([]byte, minAudioBuffer+100)),
+		vad:      NewVoiceActivityDetector(),
 	}
-
-	// Start silence timer
-	stream.startSilenceTimer(processor, sessionManager, sessionID)
-
-	// Simulate new audio arriving (which should cancel the timer)
-	stream.mu.Lock()
-	if stream.silenceTimer != nil {
-		stream.silenceTimer.Stop()
-		stream.silenceTimer = nil
+	
+	// Simulate speech
+	for i := 0; i < 5; i++ {
+		stream.vad.DetectVoiceActivity(make([]byte, 1920)) // Will detect as speech after a few frames
 	}
-	stream.mu.Unlock()
-
-	// Wait past the silence timeout
-	time.Sleep(150 * time.Millisecond)
-
-	// Transcription should NOT have been called
-	mockTranscriber.AssertNotCalled(t, "Transcribe")
+	
+	// Now simulate silence - VAD should transition to silence
+	for i := 0; i < 20; i++ {
+		stream.vad.DetectVoiceActivity(nil) // Process as silence
+	}
+	
+	assert.False(t, stream.vad.IsSpeaking(), "VAD should detect silence")
 }
 
-// TestSilenceTimerNotStartedForSmallBuffer tests that silence timer doesn't start for buffers below minimum
-func TestSilenceTimerNotStartedForSmallBuffer(t *testing.T) {
-	// Set a short silence timeout for testing
-	oldTimeout := silenceTimeout
-	silenceTimeout = 50 * time.Millisecond
-	defer func() { silenceTimeout = oldTimeout }()
-
+// TestVADStateTransitions tests VAD state transitions trigger transcription
+func TestVADStateTransitions(t *testing.T) {
 	mockTranscriber := new(MockTranscriber)
-	// processor and sessionID are created but not used directly in this test
+	_ = NewProcessor(mockTranscriber)
+	
+	// Create a stream with VAD
+	stream := &Stream{
+		UserID:   "test-user",
+		Username: "TestUser",
+		Buffer:   new(bytes.Buffer),
+		vad:      NewVoiceActivityDetector(),
+	}
+	
+	// Generate speech audio
+	speechAudio := make([]byte, 1920)
+	for i := 0; i < len(speechAudio)/2; i++ {
+		binary.LittleEndian.PutUint16(speechAudio[i*2:], uint16(5000))
+	}
+	
+	// Transition to speaking
+	for i := 0; i < 5; i++ {
+		stream.vad.DetectVoiceActivity(speechAudio)
+	}
+	assert.True(t, stream.vad.IsSpeaking(), "Should be speaking")
+	
+	// Transition to silence
+	for i := 0; i < 20; i++ {
+		stream.vad.DetectVoiceActivity(make([]byte, 1920)) // Silent audio
+	}
+	assert.False(t, stream.vad.IsSpeaking(), "Should be silent")
+}
+
+// TestVADNotTriggeredForSmallBuffer tests that VAD doesn't trigger transcription for small buffers
+func TestVADNotTriggeredForSmallBuffer(t *testing.T) {
+	mockTranscriber := new(MockTranscriber)
 	_ = NewProcessor(mockTranscriber)
 	sessionManager := session.NewManager()
 	_ = sessionManager.CreateSession("test-guild", "test-channel")
@@ -414,80 +401,99 @@ func TestSilenceTimerNotStartedForSmallBuffer(t *testing.T) {
 		UserID:   "test-user",
 		Username: "TestUser",
 		Buffer:   bytes.NewBuffer(make([]byte, minAudioBuffer-1)), // Just below minimum
+		vad:      NewVoiceActivityDetector(),
 	}
 
-	// The silence timer logic checks buffer size before transcribing
-	// Simulate the check that happens in startSilenceTimer's AfterFunc
-	stream.mu.Lock()
-	bufferSize := stream.Buffer.Len()
-	stream.mu.Unlock()
-
-	if bufferSize > minAudioBuffer {
-		// This shouldn't happen in this test
-		t.Fatal("Buffer should be below minimum")
+	// Simulate speech then silence transition with small buffer
+	speechAudio := make([]byte, 1920)
+	for i := 0; i < len(speechAudio)/2; i++ {
+		binary.LittleEndian.PutUint16(speechAudio[i*2:], uint16(5000))
+	}
+	
+	// Start speaking
+	for i := 0; i < 5; i++ {
+		stream.vad.DetectVoiceActivity(speechAudio)
+	}
+	
+	// Stop speaking (but buffer is too small)
+	for i := 0; i < 20; i++ {
+		stream.vad.DetectVoiceActivity(nil)
 	}
 
 	// Transcription should NOT be called for small buffers
 	mockTranscriber.AssertNotCalled(t, "Transcribe")
 }
 
-// TestMultipleSilenceTimers tests that multiple silence timers don't interfere
-func TestMultipleSilenceTimers(t *testing.T) {
-	// Set a short silence timeout for testing
-	oldTimeout := silenceTimeout
-	silenceTimeout = 100 * time.Millisecond
-	defer func() { silenceTimeout = oldTimeout }()
-
+// TestSmartBuffering tests that only speech audio is buffered
+func TestSmartBuffering(t *testing.T) {
 	mockTranscriber := new(MockTranscriber)
-	processor := NewProcessor(mockTranscriber)
-	sessionManager := session.NewManager()
-	sessionID := sessionManager.CreateSession("test-guild", "test-channel")
-
-	// Create a stream
+	_ = NewProcessor(mockTranscriber)
+	
+	// Create a stream with VAD
 	stream := &Stream{
 		UserID:   "test-user",
 		Username: "TestUser",
-		Buffer:   bytes.NewBuffer(make([]byte, minAudioBuffer+100)),
+		Buffer:   new(bytes.Buffer),
+		vad:      NewVoiceActivityDetector(),
 	}
-
-	// Start first silence timer
-	stream.startSilenceTimer(processor, sessionManager, sessionID)
-
-	// Try to start another timer immediately (should not create a new one)
-	stream.startSilenceTimer(processor, sessionManager, sessionID)
-
-	// Verify only one timer exists
-	stream.mu.Lock()
-	hasTimer := stream.silenceTimer != nil
-	stream.mu.Unlock()
-
-	assert.True(t, hasTimer, "Should have a timer")
-
-	// Clean up timer
-	stream.mu.Lock()
-	if stream.silenceTimer != nil {
-		stream.silenceTimer.Stop()
-		stream.silenceTimer = nil
+	
+	// Generate silent audio
+	silentAudio := make([]byte, 1920) // All zeros
+	
+	// Process silent audio - should not buffer
+	initialSize := stream.Buffer.Len()
+	for i := 0; i < 10; i++ {
+		stream.vad.DetectVoiceActivity(silentAudio)
+		if stream.vad.IsSpeaking() {
+			stream.Buffer.Write(silentAudio)
+		}
 	}
-	stream.mu.Unlock()
+	
+	assert.Equal(t, initialSize, stream.Buffer.Len(), "Buffer should not grow for silence")
+	assert.False(t, stream.vad.IsSpeaking(), "Should not be speaking")
+	
+	// Generate speech audio
+	speechAudio := make([]byte, 1920)
+	for i := 0; i < len(speechAudio)/2; i++ {
+		binary.LittleEndian.PutUint16(speechAudio[i*2:], uint16(8000))
+	}
+	
+	// Process speech audio - should buffer
+	for i := 0; i < 10; i++ {
+		stream.vad.DetectVoiceActivity(speechAudio)
+		if stream.vad.IsSpeaking() {
+			stream.Buffer.Write(speechAudio)
+		}
+	}
+	
+	assert.Greater(t, stream.Buffer.Len(), initialSize, "Buffer should grow for speech")
+	assert.True(t, stream.vad.IsSpeaking(), "Should be speaking")
 }
 
-// TestTranscribeAndClearWithSilenceTimer tests that transcribeAndClear cancels silence timer
-func TestTranscribeAndClearWithSilenceTimer(t *testing.T) {
+// TestTranscribeAndClearResetsVAD tests that transcribeAndClear resets VAD state
+func TestTranscribeAndClearResetsVAD(t *testing.T) {
 	mockTranscriber := new(MockTranscriber)
 	processor := NewProcessor(mockTranscriber)
 	sessionManager := session.NewManager()
 	sessionID := sessionManager.CreateSession("test-guild", "test-channel")
 
-	// Create stream with data and active silence timer
+	// Create stream with data and VAD in speaking state
 	stream := &Stream{
 		UserID:   "test-user",
 		Username: "TestUser",
 		Buffer:   bytes.NewBuffer(make([]byte, 1000)),
+		vad:      NewVoiceActivityDetector(),
 	}
-
-	// Start a silence timer
-	stream.silenceTimer = time.NewTimer(1 * time.Hour) // Long timer that should be cancelled
+	
+	// Put VAD in speaking state
+	speechAudio := make([]byte, 1920)
+	for i := 0; i < len(speechAudio)/2; i++ {
+		binary.LittleEndian.PutUint16(speechAudio[i*2:], uint16(8000))
+	}
+	for i := 0; i < 5; i++ {
+		stream.vad.DetectVoiceActivity(speechAudio)
+	}
+	assert.True(t, stream.vad.IsSpeaking(), "VAD should be speaking before transcription")
 
 	// Setup mock
 	mockTranscriber.On("Transcribe", mock.Anything).Return("test", nil).Once()
@@ -495,12 +501,8 @@ func TestTranscribeAndClearWithSilenceTimer(t *testing.T) {
 	// Call transcribeAndClear
 	processor.transcribeAndClear(stream, sessionManager, sessionID)
 
-	// Verify silence timer was cancelled
-	stream.mu.Lock()
-	timerIsNil := stream.silenceTimer == nil
-	stream.mu.Unlock()
-
-	assert.True(t, timerIsNil, "Silence timer should be nil after transcribeAndClear")
+	// VAD state should be reset
+	assert.False(t, stream.vad.IsSpeaking(), "VAD should be reset after transcription")
 	mockTranscriber.AssertExpectations(t)
 }
 
@@ -554,6 +556,7 @@ func TestConcurrentTranscriptionPrevention(t *testing.T) {
 		Username:       "TestUser",
 		Buffer:         bytes.NewBuffer(make([]byte, 1000)),
 		isTranscribing: false,
+		vad:      NewVoiceActivityDetector(),
 	}
 
 	// Setup mock to simulate slow transcription
@@ -598,6 +601,7 @@ func TestTranscriptionErrorHandling(t *testing.T) {
 		UserID:   "test-user",
 		Username: "TestUser",
 		Buffer:   bytes.NewBuffer(make([]byte, 1000)),
+		vad:      NewVoiceActivityDetector(),
 	}
 
 	// Add pending transcription
@@ -636,6 +640,7 @@ func TestTranscribeAndClearEmptyTranscriptionResult(t *testing.T) {
 		UserID:   "test-user",
 		Username: "TestUser",
 		Buffer:   bytes.NewBuffer(make([]byte, 1000)),
+		vad:      NewVoiceActivityDetector(),
 	}
 
 	// Setup mock to return empty string (e.g., silence or unrecognizable audio)
@@ -665,6 +670,7 @@ func TestIsTranscribingFlagReset(t *testing.T) {
 		Username:       "TestUser",
 		Buffer:         bytes.NewBuffer(make([]byte, 1000)),
 		isTranscribing: false,
+		vad:      NewVoiceActivityDetector(),
 	}
 
 	// Test 1: Flag reset after successful transcription

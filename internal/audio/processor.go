@@ -55,6 +55,11 @@ var (
 
 	// contextExpiration is how long to keep context from previous transcripts
 	contextExpiration time.Duration
+	
+	// VAD configuration
+	vadEnergyThreshold   float64
+	vadSpeechFrames      int
+	vadSilenceFrames     int
 )
 
 func init() {
@@ -105,6 +110,30 @@ func init() {
 	}
 	contextExpiration = time.Duration(contextExpirationSec) * time.Second
 
+	// VAD Energy threshold (VAD_ENERGY_THRESHOLD)
+	vadEnergyThreshold = defaultVADEnergyThreshold
+	if val := os.Getenv("VAD_ENERGY_THRESHOLD"); val != "" {
+		if parsed, err := strconv.ParseFloat(val, 64); err == nil && parsed > 0 {
+			vadEnergyThreshold = parsed
+		}
+	}
+	
+	// VAD Speech frames required (VAD_SPEECH_FRAMES)
+	vadSpeechFrames = defaultVADSpeechFrames
+	if val := os.Getenv("VAD_SPEECH_FRAMES"); val != "" {
+		if parsed, err := strconv.Atoi(val); err == nil && parsed > 0 {
+			vadSpeechFrames = parsed
+		}
+	}
+	
+	// VAD Silence frames required (VAD_SILENCE_FRAMES)
+	vadSilenceFrames = defaultVADSilenceFrames
+	if val := os.Getenv("VAD_SILENCE_FRAMES"); val != "" {
+		if parsed, err := strconv.Atoi(val); err == nil && parsed > 0 {
+			vadSilenceFrames = parsed
+		}
+	}
+
 	// Log configuration
 	logrus.WithFields(logrus.Fields{
 		"buffer_duration_sec":    bufferDuration,
@@ -114,6 +143,9 @@ func init() {
 		"min_audio_bytes":        minAudioBuffer,
 		"overlap_ms":             overlapMs,
 		"context_expiration_sec": contextExpirationSec,
+		"vad_energy_threshold":   vadEnergyThreshold,
+		"vad_speech_frames":      vadSpeechFrames,
+		"vad_silence_frames":     vadSilenceFrames,
 	}).Info("Audio processor configuration loaded")
 }
 
@@ -130,7 +162,6 @@ type Stream struct {
 	Username       string
 	Buffer         *bytes.Buffer
 	mu             sync.Mutex
-	silenceTimer   *time.Timer // Timer for detecting silence
 	lastAudioTime  time.Time   // Last time we received real audio (not silence)
 	isTranscribing bool        // Prevent concurrent transcriptions
 
@@ -185,18 +216,30 @@ func (p *Processor) ProcessVoiceReceive(vc *discordgo.VoiceConnection, sessionMa
 		userID, username, nickname := userResolver.GetUserBySSRC(packet.SSRC)
 		stream := p.getOrCreateStream(packet.SSRC, userID, username, nickname, sessionManager, activeSessionID)
 
-		// Process all packets through VAD (even silence packets)
-		var pcmBytes []byte
-		
+		// Skip VAD for comfort noise packets - they're always silence
 		if isSilencePacket {
-			// Generate comfort noise for silence packets
-			// Discord sends these to maintain connection when user is not speaking
-			pcmBytes = make([]byte, frameSize*channels*2)
-			// Fill with very low amplitude noise (near zero)
-			for i := range pcmBytes {
-				pcmBytes[i] = 0
+			// Check if we need to trigger transcription due to silence
+			stream.mu.Lock()
+			wasSpeaking := stream.vad.IsSpeaking()
+			stream.vad.DetectVoiceActivity(nil) // Process as silence
+			isSpeaking := stream.vad.IsSpeaking()
+			bufferSize := stream.Buffer.Len()
+			stream.mu.Unlock()
+			
+			// Trigger transcription if we transitioned from speaking to silence
+			if wasSpeaking && !isSpeaking && bufferSize > minAudioBuffer {
+				logrus.WithFields(logrus.Fields{
+					"buffer_size": bufferSize,
+					"user":        stream.UserID,
+				}).Info("VAD detected end of speech, triggering transcription")
+				go p.transcribeAndClear(stream, sessionManager, activeSessionID)
 			}
-		} else {
+			continue
+		}
+		
+		// Decode real audio packets
+		var pcmBytes []byte
+		{
 			// Decode opus to PCM (real audio)
 			pcm, err := decoder.Decode(packet.Opus, frameSize, false)
 			if err != nil {
@@ -222,35 +265,29 @@ func (p *Processor) ProcessVoiceReceive(vc *discordgo.VoiceConnection, sessionMa
 		}
 
 		// Run VAD on the PCM data
+		stream.mu.Lock()
+		wasSpeaking := stream.vad.IsSpeaking()
 		isSpeaking := stream.vad.DetectVoiceActivity(pcmBytes)
 		
-		// Handle voice activity state changes
-		stream.mu.Lock()
-		
+		// Smart buffering - only buffer when speaking
 		if isSpeaking {
 			// Voice detected - add to buffer
 			stream.Buffer.Write(pcmBytes)
 			stream.lastAudioTime = time.Now()
-			
-			// Cancel silence timer since we're speaking
-			if stream.silenceTimer != nil {
-				stream.silenceTimer.Stop()
-				stream.silenceTimer = nil
-			}
-		} else {
-			// No voice detected
-			bufferSize := stream.Buffer.Len()
-			
-			if bufferSize > minAudioBuffer && stream.silenceTimer == nil {
-				// We have audio in buffer and voice stopped - start silence timer
-				stream.mu.Unlock()
-				stream.startSilenceTimer(p, sessionManager, activeSessionID)
-				stream.mu.Lock()
-			}
 		}
 		
 		bufferSize := stream.Buffer.Len()
 		stream.mu.Unlock()
+		
+		// Handle state transitions
+		if wasSpeaking && !isSpeaking && bufferSize > minAudioBuffer {
+			// Speech ended - trigger transcription
+			logrus.WithFields(logrus.Fields{
+				"buffer_size": bufferSize,
+				"user":        stream.UserID,
+			}).Info("VAD detected end of speech, triggering transcription")
+			go p.transcribeAndClear(stream, sessionManager, activeSessionID)
+		}
 
 		logrus.WithFields(logrus.Fields{
 			"buffer_size":  bufferSize,
@@ -292,7 +329,11 @@ func (p *Processor) getOrCreateStream(ssrc uint32, userID, username, nickname st
 		Username:      nickname, // Use nickname as display name
 		Buffer:        new(bytes.Buffer),
 		lastAudioTime: time.Now(),
-		vad:           NewVoiceActivityDetector(),
+		vad:           NewVoiceActivityDetectorWithConfig(VADConfig{
+			EnergyThreshold:       vadEnergyThreshold,
+			SpeechFramesRequired:  vadSpeechFrames,
+			SilenceFramesRequired: vadSilenceFrames,
+		}),
 		decoderBuffer: make([]byte, frameSize*channels*2), // Pre-allocate decoder buffer
 	}
 	p.activeStreams[streamID] = stream
@@ -306,37 +347,6 @@ func (p *Processor) getOrCreateStream(ssrc uint32, userID, username, nickname st
 	return stream
 }
 
-// startSilenceTimer starts or resets the silence detection timer
-func (s *Stream) startSilenceTimer(processor *Processor, sessionManager *session.Manager, sessionID string) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	// If timer already exists, don't create a new one
-	if s.silenceTimer != nil {
-		return
-	}
-
-	// Create timer that triggers after silence timeout
-	s.silenceTimer = time.AfterFunc(silenceTimeout, func() {
-		s.mu.Lock()
-		bufferSize := s.Buffer.Len()
-		s.mu.Unlock()
-
-		if bufferSize > minAudioBuffer {
-			logrus.WithFields(logrus.Fields{
-				"buffer_size":      bufferSize,
-				"user":             s.UserID,
-				"silence_duration": silenceTimeout,
-			}).Info("Silence detected, triggering transcription")
-			processor.transcribeAndClear(s, sessionManager, sessionID)
-		}
-
-		// Clear the timer reference
-		s.mu.Lock()
-		s.silenceTimer = nil
-		s.mu.Unlock()
-	})
-}
 
 func (p *Processor) transcribeAndClear(stream *Stream, sessionManager *session.Manager, sessionID string) {
 	stream.mu.Lock()
@@ -347,14 +357,10 @@ func (p *Processor) transcribeAndClear(stream *Stream, sessionManager *session.M
 		return
 	}
 	stream.isTranscribing = true
-
-	// Cancel any pending silence timer
-	if stream.silenceTimer != nil {
-		stream.silenceTimer.Stop()
-		stream.silenceTimer = nil
-	}
-
 	audioData := stream.Buffer.Bytes()
+	
+	// Reset VAD state after transcription
+	stream.vad.Reset()
 
 	// Save audio for overlap to prevent word cutoffs
 	// Get overlap duration from environment or use default

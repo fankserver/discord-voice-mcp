@@ -69,8 +69,11 @@ func NewVoiceActivityDetectorWithConfig(config VADConfig) *VoiceActivityDetector
 
 // DetectVoiceActivity analyzes PCM audio samples to detect voice
 func (vad *VoiceActivityDetector) DetectVoiceActivity(pcmData []byte) bool {
-	if len(pcmData) == 0 {
-		return false
+	// Handle nil or empty data as silence
+	if pcmData == nil || len(pcmData) == 0 {
+		// Process as silence frame
+		vad.updateState(false)
+		return vad.isSpeaking
 	}
 	
 	// Convert byte array to int16 samples
