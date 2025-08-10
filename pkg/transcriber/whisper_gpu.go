@@ -215,7 +215,8 @@ func (wt *GPUWhisperTranscriber) Transcribe(audio []byte) (string, error) {
 
 	// Log performance metrics
 	duration := time.Since(startTime)
-	audioDuration := time.Duration(len(audio)/96000) * time.Second // 48kHz stereo 16-bit
+	// 48kHz stereo 16-bit = 48000 samples/sec * 2 channels * 2 bytes/sample = 192000 bytes/sec
+	audioDuration := time.Duration(len(audio)/192000) * time.Second
 	rtf := float64(duration) / float64(audioDuration)
 
 	logrus.WithFields(logrus.Fields{
