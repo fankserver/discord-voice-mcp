@@ -228,14 +228,18 @@ The Whisper Docker image (`ghcr.io/fankserver/discord-voice-mcp:whisper`) includ
 
 #### Download a Whisper Model
 ```bash
-# Download base model (142 MB) - good balance of speed and accuracy
+# For multilingual support (recommended for non-English):
 wget https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.bin -O models/ggml-base.bin
 
-# Or download other model sizes:
-# - tiny (39 MB) - fastest, lower accuracy
-# - small (466 MB) - better accuracy
-# - medium (1.5 GB) - high accuracy
-# - large (3 GB) - best accuracy
+# For German language specifically, use the multilingual models:
+# - ggml-base.bin (142 MB) - good balance, supports 99 languages
+# - ggml-small.bin (466 MB) - better accuracy for German
+# - ggml-medium.bin (1.5 GB) - high accuracy
+# - ggml-large-v3.bin (3.1 GB) - best accuracy
+
+# For English-only (faster but no German support):
+# - ggml-base.en.bin (142 MB) - English only
+# - ggml-tiny.en.bin (39 MB) - fastest, English only
 ```
 
 #### Run with GPU Acceleration
@@ -315,6 +319,65 @@ docker build -f Dockerfile.whisper-cuda -t discord-voice-mcp:whisper-cuda .
 docker build -f Dockerfile -t discord-voice-mcp:latest .
 ```
 
+## 🎯 Improving Transcription Accuracy
+
+### Critical: Audio Buffer Configuration
+
+**The most common cause of poor transcription** is audio being split into chunks that are too small, causing loss of context. For example, "und meinen zwei Bären" (and my two bears) might be split into "und meinen zwei" and "Bären", causing Whisper to misinterpret "Bären" as "wären" (would be) without context.
+
+**Solution**: Increase the buffer duration to capture complete sentences:
+```bash
+-e AUDIO_BUFFER_DURATION_SEC="5"  # Default is 2, use 5-10 for better context
+-e AUDIO_SILENCE_TIMEOUT_MS="2000"  # Default is 1500, increase for natural pauses
+```
+
+### For German and Other Non-English Languages
+
+If you're experiencing poor transcription accuracy with German or other non-English languages (e.g., "Bär" being transcribed as "Bild"), follow these recommendations:
+
+1. **Use a multilingual model** (not the `.en` variants):
+   ```bash
+   # Download a multilingual model (small recommended for German)
+   wget https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.bin -O models/ggml-small.bin
+   ```
+
+2. **Explicitly set the language**:
+   ```bash
+   -e WHISPER_LANGUAGE="de"  # For German
+   ```
+
+3. **Use higher beam size for better accuracy**:
+   ```bash
+   -e WHISPER_BEAM_SIZE="5"  # Default is 1 for speed, 5 for accuracy
+   ```
+
+4. **Complete example for German transcription**:
+   ```bash
+   docker run -i --rm --gpus all \
+     -e DISCORD_TOKEN="your-bot-token" \
+     -e DISCORD_USER_ID="your-discord-user-id" \
+     -e TRANSCRIBER_TYPE="whisper" \
+     -e WHISPER_MODEL_PATH="/models/ggml-small.bin" \
+     -e WHISPER_LANGUAGE="de" \
+     -e WHISPER_BEAM_SIZE="5" \
+     -e AUDIO_BUFFER_DURATION_SEC="5" \
+     -e AUDIO_SILENCE_TIMEOUT_MS="2000" \
+     -v $(pwd)/models:/models:ro \
+     ghcr.io/fankserver/discord-voice-mcp:whisper-cuda
+   ```
+   
+   **Important**: The longer buffer (5 seconds) allows Whisper to maintain context across complete sentences, significantly improving accuracy for languages like German where word order and context are crucial.
+
+### Model Selection Guide
+
+| Use Case | Model | Size | Languages | Accuracy |
+|----------|-------|------|-----------|----------|
+| **German/Multilingual** | ggml-small.bin | 466 MB | 99 | Good |
+| **German/Multilingual (Best)** | ggml-medium.bin | 1.5 GB | 99 | High |
+| **English Only** | ggml-base.en.bin | 142 MB | 1 | Good |
+| **Fast Testing** | ggml-tiny.bin | 39 MB | 99 | Low |
+| **Production German** | ggml-large-v3.bin | 3.1 GB | 99 | Best |
+
 ## ⚙️ Audio Processing Configuration
 
 The audio processing behavior can be customized using environment variables:
@@ -364,14 +427,22 @@ docker run -i --rm \
   ghcr.io/fankserver/discord-voice-mcp:latest
 ```
 
-**Force specific language:**
+**Force specific language (recommended for better accuracy):**
 ```bash
-# Force German transcription only
-docker run -i --rm \
+# Force German transcription with optimized settings
+docker run -i --rm --gpus all \
   -e DISCORD_TOKEN="your-bot-token" \
   -e DISCORD_USER_ID="your-discord-user-id" \
+  -e TRANSCRIBER_TYPE="whisper" \
+  -e WHISPER_MODEL_PATH="/models/ggml-small.bin" \
   -e WHISPER_LANGUAGE="de" \
-  ghcr.io/fankserver/discord-voice-mcp:latest
+  -e WHISPER_BEAM_SIZE="5" \
+  -e AUDIO_BUFFER_DURATION_SEC="5" \
+  -e AUDIO_SILENCE_TIMEOUT_MS="2000" \
+  -v $(pwd)/models:/models:ro \
+  ghcr.io/fankserver/discord-voice-mcp:whisper-cuda
+
+# Other language codes: en (English), es (Spanish), fr (French), it (Italian), etc.
 ```
 
 **Optimize for faster transcription (reduce delay):**

@@ -1,10 +1,12 @@
 # NVIDIA GPU Optimized via CUDA (Maximum Performance)
-# Build stage for Go binary
-FROM golang:1.24-alpine3.21 AS go-builder
+# Build stage for Go binary - using Ubuntu for glibc compatibility
+FROM golang:1.24-bookworm AS go-builder
 
 # Install build dependencies
-# hadolint ignore=DL3018
-RUN apk add --no-cache git gcc musl-dev pkgconfig opus-dev
+# hadolint ignore=DL3008
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    git gcc pkg-config libopus-dev \
+    && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
@@ -23,8 +25,8 @@ RUN CGO_ENABLED=1 go build -ldflags '-w -s' \
 # Use prebuilt CUDA-enabled image for maximum NVIDIA performance
 FROM ghcr.io/ggml-org/whisper.cpp:main-cuda AS whisper-source
 
-# Final stage with CUDA base for NVIDIA GPUs
-FROM nvidia/cuda:12.2.0-base-ubuntu22.04 AS final
+# Final stage with CUDA runtime for NVIDIA GPUs (includes CUDA libraries)
+FROM nvidia/cuda:12.2.0-runtime-ubuntu22.04 AS final
 
 # Install runtime dependencies
 # hadolint ignore=DL3008
@@ -44,7 +46,10 @@ COPY --from=go-builder /app/discord-voice-mcp .
 COPY --from=whisper-source /app/build/bin/whisper-cli /usr/local/bin/whisper
 COPY --from=whisper-source /app/build/bin/whisper-server /usr/local/bin/whisper-server
 COPY --from=whisper-source /app/build/src/libwhisper.so* /usr/local/lib/
+# Copy all ggml libraries including base and CPU versions
 COPY --from=whisper-source /app/build/ggml/src/libggml*.so* /usr/local/lib/
+# Copy CUDA-specific library from its subdirectory
+COPY --from=whisper-source /app/build/ggml/src/ggml-cuda/libggml-cuda.so /usr/local/lib/
 
 # Update library cache
 RUN ldconfig

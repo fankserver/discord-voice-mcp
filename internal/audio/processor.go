@@ -28,6 +28,8 @@ const (
 	frameSize  = 960 // 20ms @ 48kHz
 
 	// Default values (can be overridden by environment variables)
+	// Note: For better transcription accuracy, especially with non-English languages,
+	// consider increasing buffer duration to 5-10 seconds to maintain sentence context
 	defaultBufferDurationSec = 2    // Default buffer duration in seconds
 	defaultSilenceTimeoutMs  = 1500 // Default silence timeout in milliseconds
 	defaultMinAudioMs        = 100  // Default minimum audio in milliseconds

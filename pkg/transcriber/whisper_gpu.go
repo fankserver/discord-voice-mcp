@@ -82,6 +82,11 @@ func NewGPUWhisperTranscriber(modelPath string) (*GPUWhisperTranscriber, error) 
 	if language == "" {
 		language = "auto"
 	}
+	
+	// Log language setting for debugging
+	if language != "auto" {
+		logrus.WithField("language", language).Info("Whisper language explicitly set")
+	}
 
 	// Get thread count
 	threads := os.Getenv("WHISPER_THREADS")
@@ -97,7 +102,12 @@ func NewGPUWhisperTranscriber(modelPath string) (*GPUWhisperTranscriber, error) 
 	// Get beam size
 	beamSize := os.Getenv("WHISPER_BEAM_SIZE")
 	if beamSize == "" {
-		beamSize = "1" // Fast mode by default
+		// Use beam size 5 for better accuracy when language is explicitly set
+		if language != "auto" {
+			beamSize = "5"
+		} else {
+			beamSize = "1" // Fast mode by default for auto-detect
+		}
 	}
 
 	logrus.WithFields(logrus.Fields{
@@ -128,9 +138,11 @@ func (wt *GPUWhisperTranscriber) Transcribe(audio []byte) (string, error) {
 	startTime := time.Now()
 
 	logrus.WithFields(logrus.Fields{
-		"audio_bytes": len(audio),
-		"model":       wt.modelPath,
-		"gpu":         wt.useGPU,
+		"audio_bytes":       len(audio),
+		"audio_duration_ms": len(audio) * 1000 / 192000,
+		"model":             wt.modelPath,
+		"gpu":               wt.useGPU,
+		"gpu_layers":        wt.gpuLayers,
 	}).Debug("GPUWhisperTranscriber: Starting transcription")
 
 	// Convert PCM to WAV format using ffmpeg
@@ -160,6 +172,12 @@ func (wt *GPUWhisperTranscriber) Transcribe(audio []byte) (string, error) {
 		return "", fmt.Errorf("audio conversion failed: %w", err)
 	}
 
+	logrus.WithFields(logrus.Fields{
+		"wav_size":     wavBuf.Len(),
+		"pcm_size":     len(audio),
+		"duration_sec": float64(len(audio)) / 192000.0,
+	}).Debug("GPUWhisperTranscriber: Converted PCM to WAV")
+
 	// Build whisper command with GPU support if available
 	whisperArgs := []string{
 		"-m", wt.modelPath,
@@ -169,16 +187,26 @@ func (wt *GPUWhisperTranscriber) Transcribe(audio []byte) (string, error) {
 		"--no-timestamps",
 		"-otxt",
 	}
+	
+	// Add additional accuracy parameters for non-English languages
+	if wt.language != "auto" && wt.language != "en" {
+		// Higher temperature for better accuracy with non-English
+		whisperArgs = append(whisperArgs, "-tp", "0.8")
+		// Use best_of for better quality
+		whisperArgs = append(whisperArgs, "-bo", "5")
+	}
 
-	// Add GPU-specific flags if GPU is available
-	if wt.useGPU && wt.gpuLayers > 0 {
-		// For whisper.cpp with CUDA support
-		whisperArgs = append(whisperArgs, "-ngl", strconv.Itoa(wt.gpuLayers))
-
-		// Optional: Add flash attention if supported
+	// Add GPU-specific flags if available
+	if wt.useGPU {
+		// The prebuilt whisper binary uses GPU by default when available
+		// Only add --no-gpu flag if we want to disable it
+		// Flash attention is supported with -fa flag
 		if os.Getenv("WHISPER_FLASH_ATTN") == "true" {
 			whisperArgs = append(whisperArgs, "-fa")
 		}
+	} else {
+		// Explicitly disable GPU if not wanted
+		whisperArgs = append(whisperArgs, "--no-gpu")
 	}
 
 	// Add input from stdin
@@ -205,10 +233,18 @@ func (wt *GPUWhisperTranscriber) Transcribe(audio []byte) (string, error) {
 		return "", fmt.Errorf("whisper transcription failed: %w", err)
 	}
 
+	// Log stderr output for debugging (includes model loading and performance info)
+	if errBuf.Len() > 0 {
+		logrus.WithField("stderr", errBuf.String()).Debug("Whisper stderr output")
+	}
+
 	// Clean up the output
 	transcript := string(bytes.TrimSpace(outBuf.Bytes()))
 	if transcript == "" {
-		logrus.Debug("GPUWhisperTranscriber: No speech detected")
+		logrus.WithFields(logrus.Fields{
+			"audio_duration_ms": len(audio) * 1000 / 192000,
+			"stderr_len":        errBuf.Len(),
+		}).Debug("GPUWhisperTranscriber: No speech detected")
 		return "[No speech detected]", nil
 	}
 
