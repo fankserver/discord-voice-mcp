@@ -30,10 +30,11 @@ const (
 	// Default values (can be overridden by environment variables)
 	// Note: For better transcription accuracy, especially with non-English languages,
 	// consider increasing buffer duration to 5-10 seconds to maintain sentence context
-	defaultBufferDurationSec = 3    // 3 seconds provides good balance with prompt context
-	defaultSilenceTimeoutMs  = 1500 // 1.5 seconds for natural speech pauses
-	defaultMinAudioMs        = 100  // Default minimum audio in milliseconds
-	defaultOverlapMs         = 0    // Disabled - audio overlap not needed with prompt context
+	defaultBufferDurationSec    = 3    // 3 seconds provides good balance with prompt context
+	defaultSilenceTimeoutMs     = 1500 // 1.5 seconds for natural speech pauses
+	defaultMinAudioMs           = 100  // Default minimum audio in milliseconds
+	defaultOverlapMs            = 0    // Disabled - audio overlap not needed with prompt context
+	defaultContextExpirationSec = 10   // Clear context after 10 seconds of no activity
 )
 
 // Configurable variables (set from environment or defaults)
@@ -46,6 +47,9 @@ var (
 
 	// minAudioBuffer is the minimum audio bytes before considering transcription
 	minAudioBuffer int
+
+	// contextExpiration is how long to keep context from previous transcripts
+	contextExpiration time.Duration
 )
 
 func init() {
@@ -86,15 +90,25 @@ func init() {
 			overlapMs = parsed
 		}
 	}
-	
+
+	// Context expiration in seconds (AUDIO_CONTEXT_EXPIRATION_SEC)
+	contextExpirationSec := defaultContextExpirationSec
+	if val := os.Getenv("AUDIO_CONTEXT_EXPIRATION_SEC"); val != "" {
+		if parsed, err := strconv.Atoi(val); err == nil && parsed > 0 {
+			contextExpirationSec = parsed
+		}
+	}
+	contextExpiration = time.Duration(contextExpirationSec) * time.Second
+
 	// Log configuration
 	logrus.WithFields(logrus.Fields{
-		"buffer_duration_sec": bufferDuration,
-		"buffer_size_bytes":   transcriptionBufferSize,
-		"silence_timeout_ms":  silenceMs,
-		"min_audio_ms":        minAudioMs,
-		"min_audio_bytes":     minAudioBuffer,
-		"overlap_ms":          overlapMs,
+		"buffer_duration_sec":    bufferDuration,
+		"buffer_size_bytes":      transcriptionBufferSize,
+		"silence_timeout_ms":     silenceMs,
+		"min_audio_ms":           minAudioMs,
+		"min_audio_bytes":        minAudioBuffer,
+		"overlap_ms":             overlapMs,
+		"context_expiration_sec": contextExpirationSec,
 	}).Info("Audio processor configuration loaded")
 }
 
@@ -114,10 +128,11 @@ type Stream struct {
 	silenceTimer   *time.Timer // Timer for detecting silence
 	lastAudioTime  time.Time   // Last time we received real audio (not silence)
 	isTranscribing bool        // Prevent concurrent transcriptions
-	
+
 	// Context preservation for better transcription accuracy
-	lastTranscript string      // Last successful transcript for context
-	overlapBuffer  []byte      // Last 1 second of audio for overlap
+	lastTranscript     string    // Last successful transcript for context
+	lastTranscriptTime time.Time // When the last transcript was created
+	overlapBuffer      []byte    // Last 1 second of audio for overlap
 }
 
 // NewProcessor creates a new audio processor
@@ -309,7 +324,7 @@ func (p *Processor) transcribeAndClear(stream *Stream, sessionManager *session.M
 	}
 
 	audioData := stream.Buffer.Bytes()
-	
+
 	// Save audio for overlap to prevent word cutoffs
 	// Get overlap duration from environment or use default
 	overlapDurationMs := defaultOverlapMs
@@ -318,11 +333,11 @@ func (p *Processor) transcribeAndClear(stream *Stream, sessionManager *session.M
 			overlapDurationMs = parsed
 		}
 	}
-	
+
 	// Calculate overlap size in bytes
 	// Note: 200ms is usually enough to capture word boundaries without causing duplicate transcriptions
 	overlapSize := (sampleRate * channels * 2 * overlapDurationMs) / 1000
-	
+
 	// Skip overlap if disabled (overlapDurationMs = 0)
 	if overlapDurationMs == 0 {
 		stream.overlapBuffer = nil
@@ -332,7 +347,7 @@ func (p *Processor) transcribeAndClear(stream *Stream, sessionManager *session.M
 		if len(audioData) < overlapSize {
 			copySize = len(audioData)
 		}
-		
+
 		// Reuse buffer if capacity is sufficient to avoid re-allocation
 		if cap(stream.overlapBuffer) < copySize {
 			stream.overlapBuffer = make([]byte, copySize)
@@ -341,10 +356,25 @@ func (p *Processor) transcribeAndClear(stream *Stream, sessionManager *session.M
 		}
 		copy(stream.overlapBuffer, audioData[len(audioData)-copySize:])
 	}
-	
+
 	// Get context from previous transcript
-	lastTranscript := stream.lastTranscript
-	
+	// Clear context if it's been too long since last transcription (conversation break)
+	var lastTranscript string
+	if time.Since(stream.lastTranscriptTime) < contextExpiration {
+		lastTranscript = stream.lastTranscript
+		logrus.WithFields(logrus.Fields{
+			"time_since_last": time.Since(stream.lastTranscriptTime),
+			"using_context":   true,
+		}).Debug("Using previous transcript as context")
+	} else if stream.lastTranscript != "" {
+		// Clear expired context
+		logrus.WithFields(logrus.Fields{
+			"time_since_last": time.Since(stream.lastTranscriptTime),
+			"context_cleared": true,
+		}).Info("Context expired, starting fresh conversation")
+		stream.lastTranscript = ""
+	}
+
 	stream.Buffer.Reset()
 	stream.mu.Unlock()
 
@@ -405,8 +435,9 @@ func (p *Processor) transcribeAndClear(stream *Stream, sessionManager *session.M
 		// Save transcript for context in next chunk
 		stream.mu.Lock()
 		stream.lastTranscript = text
+		stream.lastTranscriptTime = time.Now()
 		stream.mu.Unlock()
-		
+
 		// Add to session (this will also remove the pending transcription)
 		err = sessionManager.AddTranscript(sessionID, stream.UserID, stream.Username, text)
 		if err != nil {

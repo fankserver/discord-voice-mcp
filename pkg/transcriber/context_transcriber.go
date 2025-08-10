@@ -12,11 +12,11 @@ type TranscribeOptions struct {
 	// PreviousTranscript provides context from the last transcription
 	// This helps maintain continuity across chunk boundaries
 	PreviousTranscript string
-	
+
 	// OverlapAudio contains the last ~1 second of the previous chunk
 	// This prevents words from being cut off mid-syllable at boundaries
 	OverlapAudio []byte
-	
+
 	// Language hint for better accuracy (e.g., "de" for German)
 	Language string
 }
@@ -44,7 +44,7 @@ func CreateContextPrompt(previousTranscript string) string {
 	if previousTranscript == "" {
 		return ""
 	}
-	
+
 	// Remove any special characters that might break command-line parsing
 	// Keep only alphanumeric, spaces, and basic punctuation
 	cleanTranscript := strings.Map(func(r rune) rune {
@@ -63,10 +63,10 @@ func CreateContextPrompt(previousTranscript string) string {
 			return ' ' // Replace other characters with space
 		}
 	}, previousTranscript)
-	
+
 	// Normalize multiple spaces to single space
 	cleanTranscript = strings.Join(strings.Fields(cleanTranscript), " ")
-	
+
 	words := strings.Fields(cleanTranscript)
 	if len(words) > ContextWordCount {
 		words = words[len(words)-ContextWordCount:]

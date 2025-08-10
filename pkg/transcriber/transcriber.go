@@ -109,13 +109,13 @@ func (wt *WhisperTranscriber) TranscribeWithContext(audio []byte, opts Transcrib
 	// Use only the current audio chunk without overlap
 	// The overlap context is now provided via the --prompt parameter
 	finalAudio := audio
-	
+
 	// Note: We don't prepend overlap audio anymore as it causes duplicates
 	// Context is maintained through the prompt parameter instead
 	if len(opts.OverlapAudio) > 0 {
 		logrus.Debug("Overlap audio available but not prepended (using prompt for context instead)")
 	}
-	
+
 	logrus.WithFields(logrus.Fields{
 		"audio_bytes": len(finalAudio),
 		"model":       wt.modelPath,
@@ -163,33 +163,26 @@ func (wt *WhisperTranscriber) TranscribeWithContext(audio []byte, opts Transcrib
 		"--no-timestamps", // Don't include timestamps in output
 		"-otxt",           // Output format: plain text
 	}
-	
+
 	// Add context from previous transcript as initial prompt
-	// TEMPORARY: Disabled due to whisper.cpp crash with prompt parameter
-	// The crash shows "std::invalid_argument: stoi" which suggests whisper.cpp
-	// is trying to parse the prompt as an integer somewhere.
-	// TODO: Investigate whisper.cpp source to understand correct prompt format
-	const usePrompt = false // Temporarily disabled
-	if usePrompt {
-		if prompt := CreateContextPrompt(opts.PreviousTranscript); prompt != "" {
-			// Log the exact prompt for debugging
-			logrus.WithFields(logrus.Fields{
-				"prompt":       prompt,
-				"prompt_len":   len(prompt),
-				"prompt_words": len(strings.Fields(prompt)),
-			}).Debug("Using previous transcript as prompt")
-			
-			// Use --prompt instead of -p to avoid parsing issues
-			whisperArgs = append(whisperArgs, "--prompt", prompt)
-		}
+	// This helps maintain continuity across chunk boundaries
+	// IMPORTANT: Use --prompt (not -p) for text prompts
+	// The -p flag expects an integer for parallel processing
+	if prompt := CreateContextPrompt(opts.PreviousTranscript); prompt != "" {
+		// Log the exact prompt for debugging
+		logrus.WithFields(logrus.Fields{
+			"prompt":       prompt,
+			"prompt_len":   len(prompt),
+			"prompt_words": len(strings.Fields(prompt)),
+		}).Debug("Using previous transcript as prompt")
+
+		// Use --prompt (not -p) for text prompts
+		// The -p flag is for number of processors, not prompt text!
+		whisperArgs = append(whisperArgs, "--prompt", prompt)
 	}
-	
-	// Log that we're using overlap audio for context instead of prompt
-	if len(opts.OverlapAudio) > 0 {
-		logrus.Info("Using overlap audio for context (prompt temporarily disabled due to whisper.cpp issue)")
-	}
-	
+
 	whisperArgs = append(whisperArgs, "-") // Read from stdin
+	// #nosec G204 - whisperPath is validated during initialization, arguments are controlled
 	whisperCmd := exec.Command(wt.whisperPath, whisperArgs...)
 	whisperCmd.Stdin = &wavBuf
 

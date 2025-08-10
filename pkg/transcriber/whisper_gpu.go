@@ -83,7 +83,7 @@ func NewGPUWhisperTranscriber(modelPath string) (*GPUWhisperTranscriber, error) 
 	if language == "" {
 		language = "auto"
 	}
-	
+
 	// Log language setting for debugging
 	if language != "auto" {
 		logrus.WithField("language", language).Info("Whisper language explicitly set")
@@ -142,11 +142,11 @@ func (wt *GPUWhisperTranscriber) Transcribe(audio []byte) (string, error) {
 // TranscribeWithContext uses whisper.cpp CLI with context for better accuracy
 func (wt *GPUWhisperTranscriber) TranscribeWithContext(audio []byte, opts TranscribeOptions) (string, error) {
 	startTime := time.Now()
-	
+
 	// Use only the current audio chunk without overlap
 	// The overlap context is now provided via the --prompt parameter
 	finalAudio := audio
-	
+
 	// Note: We don't prepend overlap audio anymore as it causes duplicates
 	// Context is maintained through the prompt parameter instead
 	if len(opts.OverlapAudio) > 0 {
@@ -204,34 +204,24 @@ func (wt *GPUWhisperTranscriber) TranscribeWithContext(audio []byte, opts Transc
 		"--no-timestamps",
 		"-otxt",
 	}
-	
+
 	// Add context from previous transcript as initial prompt
 	// This helps maintain continuity across chunk boundaries
-	// TEMPORARY: Disabled due to whisper.cpp crash with prompt parameter
-	// The crash shows "std::invalid_argument: stoi" which suggests whisper.cpp
-	// is trying to parse the prompt as an integer somewhere.
-	// TODO: Investigate whisper.cpp source to understand correct prompt format
-	const usePrompt = false // Temporarily disabled
-	if usePrompt {
-		if prompt := CreateContextPrompt(opts.PreviousTranscript); prompt != "" {
-			// Log the exact prompt for debugging
-			logrus.WithFields(logrus.Fields{
-				"prompt":       prompt,
-				"prompt_len":   len(prompt),
-				"prompt_words": len(strings.Fields(prompt)),
-			}).Debug("Using previous transcript as prompt")
-			
-			// Use --prompt instead of -p to avoid parsing issues
-			// Also ensure the prompt is properly escaped
-			whisperArgs = append(whisperArgs, "--prompt", prompt)
-		}
+	// IMPORTANT: Use --prompt (not -p) for text prompts
+	// The -p flag expects an integer for parallel processing
+	if prompt := CreateContextPrompt(opts.PreviousTranscript); prompt != "" {
+		// Log the exact prompt for debugging
+		logrus.WithFields(logrus.Fields{
+			"prompt":       prompt,
+			"prompt_len":   len(prompt),
+			"prompt_words": len(strings.Fields(prompt)),
+		}).Debug("Using previous transcript as prompt")
+
+		// Use --prompt (not -p) for text prompts
+		// The -p flag is for number of processors, not prompt text!
+		whisperArgs = append(whisperArgs, "--prompt", prompt)
 	}
-	
-	// Log that we're using overlap audio for context instead of prompt
-	if len(opts.OverlapAudio) > 0 {
-		logrus.Info("Using overlap audio for context (prompt temporarily disabled due to whisper.cpp issue)")
-	}
-	
+
 	// Add additional accuracy parameters for non-English languages
 	if wt.language != "auto" && wt.language != "en" {
 		// Higher temperature for better accuracy with non-English
