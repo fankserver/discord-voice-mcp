@@ -108,8 +108,7 @@ docker-compose up discord-voice-mcp-cuda    # NVIDIA CUDA
 # Build normal image (~50MB with ffmpeg, ccache optimized)
 docker build -t discord-voice-mcp:latest .
 
-# Build Whisper-enabled images (GPU accelerated)
-docker build -f Dockerfile.whisper -t discord-voice-mcp:whisper .
+# Build NVIDIA CUDA optimized image
 docker build -f Dockerfile.whisper-cuda -t discord-voice-mcp:cuda .
 
 # Run with environment variables
@@ -211,7 +210,7 @@ FASTER_WHISPER_BEAM_SIZE=  # 1-5, default: 1 for speed
 
 ### Traditional Build Images (ccache optimized)
 - **Dockerfile**: Alpine base with ffmpeg (~50MB, ccache enabled)
-- **Dockerfile.whisper**: Universal GPU support via Vulkan (ccache enabled)
+- **Dockerfile.whisper-cuda**: NVIDIA CUDA maximum performance (ccache enabled)
 
 All images feature:
 - Multi-stage builds with ccache for 80-90% faster rebuilds
