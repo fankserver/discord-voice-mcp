@@ -1,0 +1,105 @@
+version: '3.8'
+
+services:
+  # Standard CPU-only deployment
+  discord-voice-mcp:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      - DISCORD_TOKEN=${DISCORD_TOKEN}
+      - DISCORD_USER_ID=${DISCORD_USER_ID}
+      - TRANSCRIBER_TYPE=mock
+      - LOG_LEVEL=info
+    stdin_open: true
+    tty: true
+
+  # FasterWhisper with GPU acceleration (fastest deployment)
+  discord-voice-mcp-faster:
+    build:
+      context: .
+      dockerfile: Dockerfile.faster-whisper
+    environment:
+      - DISCORD_TOKEN=${DISCORD_TOKEN}
+      - DISCORD_USER_ID=${DISCORD_USER_ID}
+      - TRANSCRIBER_TYPE=faster-whisper
+      - FASTER_WHISPER_MODEL=base.en
+      - FASTER_WHISPER_DEVICE=auto
+      - FASTER_WHISPER_COMPUTE_TYPE=float16
+      - LOG_LEVEL=info
+    stdin_open: true
+    tty: true
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
+  # AMD GPU support via ROCm
+  discord-voice-mcp-rocm:
+    build:
+      context: .
+      dockerfile: Dockerfile.rocm
+    environment:
+      - DISCORD_TOKEN=${DISCORD_TOKEN}
+      - DISCORD_USER_ID=${DISCORD_USER_ID}
+      - TRANSCRIBER_TYPE=faster-whisper
+      - FASTER_WHISPER_MODEL=base.en
+      - FASTER_WHISPER_DEVICE=rocm
+      - HSA_OVERRIDE_GFX_VERSION=10.3.0
+      - LOG_LEVEL=info
+    stdin_open: true
+    tty: true
+    devices:
+      - /dev/kfd
+      - /dev/dri
+
+  # NVIDIA GPU with CUDA (maximum performance)
+  discord-voice-mcp-cuda:
+    build:
+      context: .
+      dockerfile: Dockerfile.whisper-cuda
+    environment:
+      - DISCORD_TOKEN=${DISCORD_TOKEN}
+      - DISCORD_USER_ID=${DISCORD_USER_ID}
+      - TRANSCRIBER_TYPE=whisper
+      - WHISPER_MODEL_PATH=/models/ggml-base.en.bin
+      - WHISPER_USE_GPU=true
+      - WHISPER_GPU_TYPE=cuda
+      - LOG_LEVEL=info
+    stdin_open: true
+    tty: true
+    volumes:
+      - ./models:/models:ro
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
+  # ARM64 Jetson support
+  discord-voice-mcp-jetson:
+    build:
+      context: .
+      dockerfile: Dockerfile.jetson
+    environment:
+      - DISCORD_TOKEN=${DISCORD_TOKEN}
+      - DISCORD_USER_ID=${DISCORD_USER_ID}
+      - TRANSCRIBER_TYPE=faster-whisper
+      - FASTER_WHISPER_MODEL=base.en
+      - FASTER_WHISPER_DEVICE=cuda
+      - CUDA_CACHE_PATH=/tmp/cuda_cache
+      - LOG_LEVEL=info
+    stdin_open: true
+    tty: true
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]

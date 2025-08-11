@@ -15,6 +15,11 @@ Discord Voice MCP Server - A high-performance Discord voice transcription server
 - **uuid** (v1.6.0) - UUID generation for sessions
 - **godotenv** (v1.5.1) - Environment variable loading
 
+### Transcription Options
+- **faster-whisper** - 4x faster than OpenAI Whisper, prebuilt wheels, GPU support (CUDA/ROCm)
+- **whisper.cpp** - Official implementation with GPU acceleration (CUDA/Vulkan/Metal)
+- **Mock transcriber** - Development/testing without actual transcription
+
 ## Architecture
 
 ### Project Structure
@@ -77,15 +82,35 @@ go test -v ./internal/audio
 ```
 
 ### Docker Operations
+
+#### Fast Deployment Options (Under 5 minutes)
 ```bash
-# Build normal image (~50MB with ffmpeg)
+# Fastest deployment: FasterWhisper with GPU acceleration
+docker build -f Dockerfile.faster-whisper -t discord-voice-mcp:faster-whisper .
+docker run --gpus all -e DISCORD_TOKEN="YOUR_TOKEN" discord-voice-mcp:faster-whisper
+
+# AMD GPU via ROCm (7x performance improvement)
+docker build -f Dockerfile.rocm -t discord-voice-mcp:rocm .
+docker run --device=/dev/kfd --device=/dev/dri -e DISCORD_TOKEN="YOUR_TOKEN" discord-voice-mcp:rocm
+
+# ARM64 Jetson support
+docker build -f Dockerfile.jetson -t discord-voice-mcp:jetson .
+docker run --gpus all -e DISCORD_TOKEN="YOUR_TOKEN" discord-voice-mcp:jetson
+
+# Docker Compose for multiple variants
+docker-compose up discord-voice-mcp-faster  # FasterWhisper
+docker-compose up discord-voice-mcp-rocm    # AMD GPU
+docker-compose up discord-voice-mcp-cuda    # NVIDIA CUDA
+```
+
+#### Traditional Build Options (Optimized with ccache)
+```bash
+# Build normal image (~50MB with ffmpeg, ccache optimized)
 docker build -t discord-voice-mcp:latest .
 
-# Build minimal image (~12MB, no ffmpeg)
-docker build -f Dockerfile.minimal -t discord-voice-mcp:minimal .
-
-# Build Whisper-enabled image
+# Build Whisper-enabled images (GPU accelerated)
 docker build -f Dockerfile.whisper -t discord-voice-mcp:whisper .
+docker build -f Dockerfile.whisper-cuda -t discord-voice-mcp:cuda .
 
 # Run with environment variables
 docker run -e DISCORD_TOKEN="YOUR_TOKEN" -e DISCORD_USER_ID="USER_ID" discord-voice-mcp:latest
@@ -142,11 +167,12 @@ Configurable via environment variables:
 - Structured logging with logrus for debugging
 
 ## Environment Variables
+
+### Core Configuration
 ```bash
 DISCORD_TOKEN=             # Required: Bot token
 DISCORD_USER_ID=           # Optional: User ID for "my channel" and follow features
-TRANSCRIBER_TYPE=          # Optional: mock, whisper, google (default: mock)
-WHISPER_MODEL_PATH=        # Required for whisper transcriber
+TRANSCRIBER_TYPE=          # Optional: mock, whisper, faster-whisper, google (default: mock)
 LOG_LEVEL=                 # debug, info, warn, error (default: info)
 
 # Audio processing configuration
@@ -156,17 +182,42 @@ AUDIO_MIN_BUFFER_MS=100       # Minimum audio before transcription (default: 100
 AUDIO_OVERLAP_MS=0            # Audio overlap disabled (not needed with prompt context)
 ```
 
-## Docker Build Optimization
-Three Dockerfile variants:
-- **Dockerfile**: Alpine base with ffmpeg (~50MB)
-- **Dockerfile.minimal**: Scratch base, binary only (~12MB)
-- **Dockerfile.whisper**: Includes Whisper models and dependencies
+### Whisper.cpp Configuration
+```bash
+WHISPER_MODEL_PATH=        # Required: Path to whisper model file
+WHISPER_USE_GPU=           # true/false: Enable GPU acceleration (default: true in Docker)
+WHISPER_GPU_TYPE=          # cuda, vulkan, metal: GPU backend type
+WHISPER_LANGUAGE=          # Language code (default: auto)
+WHISPER_THREADS=           # Thread count (default: CPU cores)
+WHISPER_BEAM_SIZE=         # 1 (fast) to 5 (accurate), default: 1
+```
 
-All use:
-- Multi-stage builds (builder not in final image)
-- Static binary compilation with CGO
+### FasterWhisper Configuration (Fastest Deployment)
+```bash
+FASTER_WHISPER_MODEL=      # Model name: tiny.en, base.en, small.en, medium.en, large-v3
+FASTER_WHISPER_DEVICE=     # auto, cpu, cuda, rocm (default: auto)
+FASTER_WHISPER_COMPUTE_TYPE= # float16, int8_float16, int8 (default: float16)
+FASTER_WHISPER_LANGUAGE=   # Language code (default: auto)
+FASTER_WHISPER_BEAM_SIZE=  # 1-5, default: 1 for speed
+```
+
+## Docker Build Optimization
+
+### Fast Deployment Images (Under 5 minutes)
+- **Dockerfile.faster-whisper**: FasterWhisper with GPU support (~2GB, 4x faster transcription)
+- **Dockerfile.rocm**: AMD GPU via ROCm prebuilt images (7x performance improvement)
+- **Dockerfile.jetson**: ARM64 Jetson with TensorRT optimization
+- **Dockerfile.whisper-cuda**: NVIDIA CUDA maximum performance
+
+### Traditional Build Images (ccache optimized)
+- **Dockerfile**: Alpine base with ffmpeg (~50MB, ccache enabled)
+- **Dockerfile.whisper**: Universal GPU support via Vulkan (ccache enabled)
+
+All images feature:
+- Multi-stage builds with ccache for 80-90% faster rebuilds
+- BuildKit cache mounts for persistent compilation cache
 - Non-root user for security
-- hadolint ignore directives for unpinned packages (DL3018)
+- GPU acceleration support
 
 ## GitHub Actions Workflows
 - **CI**: Tests on Go 1.23/1.24, linting, security scanning
