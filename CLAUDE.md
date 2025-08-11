@@ -122,18 +122,21 @@ CGO_ENABLED=1 go build -a -tags netgo -ldflags '-w -s -extldflags "-static"'
 ### Audio Processing Flow
 1. Discord sends Opus packets via `VoiceConnection.OpusRecv` channel
 2. Processor decodes to PCM (48kHz, stereo)
-3. PCM buffered per user with two trigger conditions:
-   - Buffer reaches configured duration (default: 2 seconds)
-   - Silence detected for configured timeout (default: 1.5 seconds)
-4. Transcriber called with accumulated audio
-5. Transcript added to session with timestamp
+3. PCM buffered per user with intelligent multi-tier triggers:
+   - Ultra-responsive: 300ms speech + 400ms silence (rapid exchanges)
+   - Target duration: 1.5 seconds (optimal for conversations)
+   - Max duration: 3 seconds (prevents long waits)
+4. Speaker-aware dispatcher routes to per-user queues
+5. Parallel transcription with context preservation
+6. Transcript added to session with timestamp
 
-### Audio Configuration
-Configurable via environment variables:
-- `AUDIO_BUFFER_DURATION_SEC`: Buffer size trigger (default: 3 seconds with prompt context)
-- `AUDIO_SILENCE_TIMEOUT_MS`: Silence detection timeout (default: 1500ms)
-- `AUDIO_MIN_BUFFER_MS`: Minimum audio before transcription (default: 100ms)
-- `AUDIO_OVERLAP_MS`: Audio overlap between chunks (default: 0 - not needed with prompt context)
+### Audio Configuration (Ultra-Responsive Defaults)
+System defaults are optimized for Discord multi-speaker conversations.
+Override via environment variables if needed:
+- `VAD_MIN_SPEECH_MS`: Minimum speech duration (default: 300ms)
+- `VAD_SENTENCE_END_SILENCE_MS`: Sentence boundary detection (default: 400ms)
+- `VAD_TARGET_DURATION_MS`: Target segment duration (default: 1500ms)
+- `VAD_MAX_SEGMENT_DURATION_S`: Maximum segment duration (default: 3s)
 
 ### Error Handling Patterns
 - Safe type assertions to prevent panics (check `ok` return)
@@ -149,11 +152,13 @@ TRANSCRIBER_TYPE=          # Optional: mock, whisper, google (default: mock)
 WHISPER_MODEL_PATH=        # Required for whisper transcriber
 LOG_LEVEL=                 # debug, info, warn, error (default: info)
 
-# Audio processing configuration
-AUDIO_BUFFER_DURATION_SEC=3   # Buffer duration trigger (default: 3 seconds with prompt context)
-AUDIO_SILENCE_TIMEOUT_MS=1500 # Silence detection timeout (default: 1500ms)
-AUDIO_MIN_BUFFER_MS=100       # Minimum audio before transcription (default: 100ms)
-AUDIO_OVERLAP_MS=0            # Audio overlap disabled (not needed with prompt context)
+# Audio processing configuration (ultra-responsive defaults)
+VAD_MIN_SPEECH_MS=300          # Minimum speech before transcription (default: 300ms)
+VAD_SENTENCE_END_SILENCE_MS=400 # Silence for sentence boundaries (default: 400ms)
+VAD_TARGET_DURATION_MS=1500     # Target segment duration (default: 1500ms)
+VAD_MAX_SEGMENT_DURATION_S=3    # Maximum segment duration (default: 3s)
+VAD_ENERGY_DROP_RATIO=0.20      # Energy drop sensitivity (default: 0.20)
+VAD_MIN_ENERGY_LEVEL=70         # Minimum energy threshold (default: 70)
 ```
 
 ## Docker Build Optimization

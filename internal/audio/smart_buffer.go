@@ -177,7 +177,7 @@ func NewSmartUserBufferWithCallback(userID, username string, ssrc uint32, output
 		username:                username,
 		ssrc:                    ssrc,
 		activeBuffer:            NewAudioBuffer(config.SampleRate, config.Channels),
-		vad:                     NewIntelligentVAD(newConversationalVADConfig()),
+		vad:                     NewIntelligentVAD(NewIntelligentVADConfig()),
 		config:                  config,
 		metrics:                 &BufferMetrics{},
 		outputChan:              outputChan,
@@ -387,20 +387,6 @@ type BufferStatus struct {
 	ContextAge      time.Duration
 	SegmentsCreated int
 	DroppedSegments int
-}
-
-// newConversationalVADConfig returns VAD config optimized for multi-speaker Discord
-func newConversationalVADConfig() IntelligentVADConfig {
-	// Force conversational mode for Discord multi-speaker scenarios
-	return IntelligentVADConfig{
-		MinSpeechDuration:  300 * time.Millisecond,  // Very quick response
-		MaxSilenceInSpeech: 150 * time.Millisecond,  // Tight mid-sentence pause detection
-		SentenceEndSilence: 400 * time.Millisecond,  // Quick sentence boundary detection
-		MaxSegmentDuration: 3 * time.Second,         // Prevent overly long segments
-		TargetDuration:     1500 * time.Millisecond, // 1.5s target for rapid exchanges
-		EnergyDropRatio:    0.20,                    // 20% drop = very sensitive
-		MinEnergyLevel:     70.0,                    // Lower threshold for Discord voice
-	}
 }
 
 

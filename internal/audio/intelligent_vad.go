@@ -80,33 +80,18 @@ func parseEnvFloat(envVar string, defaultValue float64) float64 {
 	return defaultValue
 }
 
-// NewIntelligentVADConfig returns default configuration balanced for natural speech
+// NewIntelligentVADConfig returns ultra-responsive configuration optimized for Discord multi-speaker
 func NewIntelligentVADConfig() IntelligentVADConfig {
-	// Check for conversational mode (multi-speaker, rapid exchanges)
-	conversationMode := os.Getenv("CONVERSATION_MODE") == "true"
-	
-	if conversationMode {
-		// Conversational mode: Ultra-responsive for multi-speaker scenarios
-		return IntelligentVADConfig{
-			MinSpeechDuration:  parseEnvDurationMs("VAD_MIN_SPEECH_MS", 300),           // 0.3s min speech (faster)
-			MaxSilenceInSpeech: parseEnvDurationMs("VAD_MAX_SILENCE_IN_SPEECH_MS", 200), // 0.2s max pause (very responsive)
-			SentenceEndSilence: parseEnvDurationMs("VAD_SENTENCE_END_SILENCE_MS", 400),  // 0.4s silence = immediate transcription
-			MaxSegmentDuration: parseEnvDurationSec("VAD_MAX_SEGMENT_DURATION_S", 3),    // 3s max (much shorter)
-			TargetDuration:     parseEnvDurationMs("VAD_TARGET_DURATION_MS", 1500) / time.Millisecond * time.Millisecond,  // 1.5s target (much shorter)
-			EnergyDropRatio:    parseEnvFloat("VAD_ENERGY_DROP_RATIO", 0.25),            // 25% drop (more sensitive)
-			MinEnergyLevel:     parseEnvFloat("VAD_MIN_ENERGY_LEVEL", 80.0),             // Lower threshold
-		}
-	} else {
-		// Standard mode: Balanced for single-speaker or turn-based conversation
-		return IntelligentVADConfig{
-			MinSpeechDuration:  parseEnvDurationMs("VAD_MIN_SPEECH_MS", 500),           // 0.5s min speech
-			MaxSilenceInSpeech: parseEnvDurationMs("VAD_MAX_SILENCE_IN_SPEECH_MS", 400), // 0.4s max mid-sentence pause
-			SentenceEndSilence: parseEnvDurationMs("VAD_SENTENCE_END_SILENCE_MS", 1200), // 1.2s silence for sentence end
-			MaxSegmentDuration: parseEnvDurationSec("VAD_MAX_SEGMENT_DURATION_S", 15),   // 15s max segment
-			TargetDuration:     parseEnvDurationSec("VAD_TARGET_DURATION_S", 4),         // 4s target duration
-			EnergyDropRatio:    parseEnvFloat("VAD_ENERGY_DROP_RATIO", 0.35),            // 35% energy drop threshold
-			MinEnergyLevel:     parseEnvFloat("VAD_MIN_ENERGY_LEVEL", 100.0),            // Min energy baseline
-		}
+	// Default to ultra-responsive settings optimized for Discord multi-speaker conversations
+	// These settings work well for both single and multi-speaker scenarios
+	return IntelligentVADConfig{
+		MinSpeechDuration:  parseEnvDurationMs("VAD_MIN_SPEECH_MS", 300),           // 0.3s min speech for quick response
+		MaxSilenceInSpeech: parseEnvDurationMs("VAD_MAX_SILENCE_IN_SPEECH_MS", 200), // 0.2s max pause for tight detection
+		SentenceEndSilence: parseEnvDurationMs("VAD_SENTENCE_END_SILENCE_MS", 400),  // 0.4s silence for sentence boundaries
+		MaxSegmentDuration: parseEnvDurationSec("VAD_MAX_SEGMENT_DURATION_S", 3),    // 3s max to prevent long waits
+		TargetDuration:     parseEnvDurationMs("VAD_TARGET_DURATION_MS", 1500),      // 1.5s target for rapid exchanges
+		EnergyDropRatio:    parseEnvFloat("VAD_ENERGY_DROP_RATIO", 0.20),           // 20% drop for sensitive detection
+		MinEnergyLevel:     parseEnvFloat("VAD_MIN_ENERGY_LEVEL", 70.0),            // Lower threshold for Discord voice
 	}
 }
 
