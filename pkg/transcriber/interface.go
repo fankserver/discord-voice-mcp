@@ -107,7 +107,8 @@ type Word struct {
 }
 
 // TranscribeWithContextHelper is a helper function that provides context-aware transcription
-// This is the main function that should be used by the new async pipeline
+// This is a convenience function for cases where only the text is needed.
+// The async pipeline calls TranscribeWithContext directly to get the full TranscriptResult.
 func TranscribeWithContextHelper(t Transcriber, audio []byte, opts TranscriptionOptions) (string, error) {
 	result, err := t.TranscribeWithContext(audio, opts)
 	if err != nil {

@@ -404,7 +404,7 @@ type Worker struct {
 type VoiceBot struct {
     discord        *discordgo.Session
     sessions       *session.Manager
-    audioProcessor *audio.Processor
+    audioProcessor audio.VoiceProcessor // Interface for better decoupling
     voiceConn      *discordgo.VoiceConnection
     followUserID   string
     autoFollow     bool
