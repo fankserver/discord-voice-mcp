@@ -19,19 +19,19 @@ const (
 	// Audio configuration constants
 	defaultSampleRate = 48000
 	defaultChannels   = 2
-	
+
 	// Worker and queue configuration
 	defaultWorkerCount     = 2
 	defaultQueueSize       = 100
 	defaultEventBufferSize = 1000
 	perSpeakerQueueRatio   = 4 // Divisor for per-speaker queue size
-	
+
 	// Event publishing intervals
 	bufferingEventPacketInterval = 50 // Publish buffering status every N packets
-	
+
 	// Packet size thresholds
 	comfortNoisePacketMaxSize = 3 // Packets <= 3 bytes are comfort noise
-	
+
 	// Audio data calculations
 	bytesPerSample = 2 // 16-bit audio = 2 bytes per sample
 )
