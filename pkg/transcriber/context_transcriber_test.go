@@ -17,9 +17,17 @@ func (m *MockContextAwareTranscriber) Transcribe(audio []byte) (string, error) {
 	return args.String(0), args.Error(1)
 }
 
-func (m *MockContextAwareTranscriber) TranscribeWithContext(audio []byte, opts TranscribeOptions) (string, error) {
+func (m *MockContextAwareTranscriber) TranscribeWithContext(audio []byte, opts TranscriptionOptions) (*TranscriptResult, error) {
 	args := m.Called(audio, opts)
-	return args.String(0), args.Error(1)
+	if result := args.Get(0); result != nil {
+		return result.(*TranscriptResult), args.Error(1)
+	}
+	return nil, args.Error(1)
+}
+
+func (m *MockContextAwareTranscriber) IsReady() bool {
+	args := m.Called()
+	return args.Bool(0)
 }
 
 func (m *MockContextAwareTranscriber) Close() error {
@@ -109,23 +117,38 @@ func (m *MockBasicTranscriber) Close() error {
 	return args.Error(0)
 }
 
+func (m *MockBasicTranscriber) IsReady() bool {
+	args := m.Called()
+	return args.Bool(0)
+}
+
+func (m *MockBasicTranscriber) TranscribeWithContext(audio []byte, opts TranscriptionOptions) (*TranscriptResult, error) {
+	// Basic transcriber doesn't support context, return basic transcription
+	text, err := m.Transcribe(audio)
+	if err != nil {
+		return nil, err
+	}
+	return &TranscriptResult{Text: text}, nil
+}
+
 // TestTranscribeWithContextFallback tests fallback to basic transcription
 func TestTranscribeWithContextFallback(t *testing.T) {
 	// Test with basic transcriber (no context support)
 	mockTranscriber := new(MockBasicTranscriber)
 	audio := []byte("test audio")
-	opts := TranscribeOptions{
-		PreviousTranscript: "previous context",
-		Language:           "de",
+	opts := TranscriptionOptions{
+		PreviousContext: "previous context",
+		Language:        "de",
 	}
 
 	// Should fall back to basic Transcribe
 	mockTranscriber.On("Transcribe", audio).Return("transcribed text", nil)
 
-	result, err := TranscribeWithContext(mockTranscriber, audio, opts)
+	// Basic transcriber with context support (delegates to Transcribe internally)
+	result, err := mockTranscriber.TranscribeWithContext(audio, opts)
 
 	assert.NoError(t, err)
-	assert.Equal(t, "transcribed text", result)
+	assert.Equal(t, "transcribed text", result.Text)
 	mockTranscriber.AssertExpectations(t)
 }
 
@@ -134,19 +157,20 @@ func TestTranscribeWithContextAware(t *testing.T) {
 	// Test with context-aware transcriber
 	mockTranscriber := new(MockContextAwareTranscriber)
 	audio := []byte("test audio")
-	opts := TranscribeOptions{
-		PreviousTranscript: "previous context",
-		OverlapAudio:       []byte("overlap"),
-		Language:           "de",
+	opts := TranscriptionOptions{
+		PreviousContext: "previous context",
+		OverlapAudio:    []byte("overlap"),
+		Language:        "de",
 	}
 
 	// Should use TranscribeWithContext
-	mockTranscriber.On("TranscribeWithContext", audio, opts).Return("context-aware text", nil)
+	expectedResult := &TranscriptResult{Text: "context-aware text"}
+	mockTranscriber.On("TranscribeWithContext", audio, opts).Return(expectedResult, nil)
 
-	result, err := TranscribeWithContext(mockTranscriber, audio, opts)
+	result, err := mockTranscriber.TranscribeWithContext(audio, opts)
 
 	assert.NoError(t, err)
-	assert.Equal(t, "context-aware text", result)
+	assert.Equal(t, "context-aware text", result.Text)
 	mockTranscriber.AssertExpectations(t)
 }
 
@@ -188,13 +212,17 @@ func splitWords(s string) []string {
 	return words
 }
 
-// TestTranscribeOptionsDefaults tests default values in TranscribeOptions
-func TestTranscribeOptionsDefaults(t *testing.T) {
-	opts := TranscribeOptions{}
+// TestTranscriptionOptionsDefaults tests default values in TranscriptionOptions
+func TestTranscriptionOptionsDefaults(t *testing.T) {
+	opts := TranscriptionOptions{}
 
-	assert.Equal(t, "", opts.PreviousTranscript)
+	assert.Equal(t, "", opts.PreviousContext)
 	assert.Nil(t, opts.OverlapAudio)
 	assert.Equal(t, "", opts.Language)
+	assert.Equal(t, 0, opts.MaxAlternatives)
+	assert.Equal(t, false, opts.EnableTimestamps)
+	assert.Nil(t, opts.CustomVocabulary)
+	assert.Equal(t, float32(0), opts.Temperature)
 }
 
 // BenchmarkCreateContextPrompt benchmarks context prompt creation
