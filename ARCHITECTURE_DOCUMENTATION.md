@@ -257,7 +257,39 @@ type QueueConfig struct {
 }
 ```
 
-### 6. EventBus (`internal/feedback/events.go`)
+### 6. SimpleSSRCManager (`internal/bot/simple_ssrc_manager.go`)
+
+Deterministic SSRC-to-user mapping using only VoiceSpeakingUpdate events.
+
+```go
+type SimpleSSRCManager struct {
+    mu sync.RWMutex
+    
+    // Exact mappings from VoiceSpeakingUpdate events ONLY
+    ssrcToUser map[uint32]*UserInfo
+    userToSSRC map[string]uint32
+    
+    // Guild and channel context
+    guildID   string
+    channelID string
+}
+```
+
+**Key Characteristics:**
+- **Deterministic approach** - No guessing or confidence scoring
+- **Discord API compliant** - Uses only VoiceSpeakingUpdate events
+- **Thread-safe** - All operations protected by RWMutex
+- **Channel-scoped** - Clears mappings on channel switch
+- **Known limitation** - Users already speaking when bot joins need to toggle mic
+
+**Methods:**
+- `MapSSRC()` - Creates exact mapping from VoiceSpeakingUpdate
+- `GetUserBySSRC()` - Returns user or "Unknown-XXXXX" format
+- `SetChannel()` - Updates context and clears mappings
+- `Clear()` - Resets all mappings
+- `RegisterAudioPacket()` - No-op (doesn't analyze audio patterns)
+
+### 7. EventBus (`internal/feedback/events.go`)
 
 Real-time event system for monitoring and feedback.
 
@@ -300,8 +332,10 @@ sequenceDiagram
     participant Worker
     participant Session
 
-    Discord->>Bot: Opus Packet (20ms)
+    Discord->>Bot: Opus Packet (20ms + SSRC)
     Bot->>AsyncProc: ProcessVoice(OpusRecv)
+    
+    Note over Bot: VoiceSpeakingUpdate events map<br/>SSRC→User deterministically
     
     alt Comfort Noise (≤3 bytes)
         AsyncProc->>Buffer: ProcessAudio(nil, false)
@@ -506,6 +540,9 @@ The system exposes 8 tools via Model Context Protocol:
 ### Test Coverage
 
 - **Unit Tests**: All components with mocks
+  - SimpleSSRCManager: 100% coverage (18 test functions)
+  - Thread safety: 1000+ concurrent operations tested
+  - Edge cases: Channel switching, mapping overrides, unknown SSRCs
 - **Integration Tests**: Pipeline end-to-end
 - **Benchmarks**: VAD, buffer operations, queue dispatch
 - **Load Tests**: Multi-speaker scenarios

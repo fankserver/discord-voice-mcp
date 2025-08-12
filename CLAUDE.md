@@ -43,12 +43,19 @@ pkg/transcriber/         # Public transcriber interface (Whisper/Google/Mock)
    - Constants: 48kHz sample rate, 2 channels, 960 frame size
 
 3. **Discord Bot (`internal/bot/bot.go`)**
-   - Manages Discord voice connections and SSRC-to-user mapping
+   - Manages Discord voice connections
    - Handles voice state updates and speaking events
    - Auto-follow functionality for configured users
-   - User resolution through Discord guild member cache
+   - Uses SimpleSSRCManager for deterministic SSRC-to-user mapping
+   
+4. **SimpleSSRCManager (`internal/bot/simple_ssrc_manager.go`)**
+   - Deterministic SSRC-to-user mapping using ONLY VoiceSpeakingUpdate events
+   - Thread-safe with RWMutex protection
+   - Returns "Unknown-XXXXX" for unmapped SSRCs (no guessing)
+   - Clears all mappings on channel switch
+   - Known limitation: Users already speaking when bot joins need to toggle mic once
 
-4. **Session Manager (`internal/session/manager.go`)**
+5. **Session Manager (`internal/session/manager.go`)**
    - Thread-safe transcript storage
    - UUID-based session identification
    - JSON export functionality
@@ -138,6 +145,13 @@ Override via environment variables if needed:
 - `VAD_TARGET_DURATION_MS`: Target segment duration (default: 1500ms)
 - `VAD_MAX_SEGMENT_DURATION_S`: Maximum segment duration (default: 3s)
 
+### SSRC Mapping Approach
+- **Deterministic only** - Uses ONLY VoiceSpeakingUpdate events from Discord
+- **No guessing** - Never attempts to deduce mappings from audio patterns
+- **Discord API limitation** - VoiceSpeakingUpdate only fires when user starts speaking AFTER bot joins
+- **User experience** - Shows "Unknown-XXXXX" for unmapped users (they need to toggle mic once)
+- **Clean implementation** - SimpleSSRCManager replaces complex confidence-based system (removed 900+ lines)
+
 ### Error Handling Patterns
 - Safe type assertions to prevent panics (check `ok` return)
 - No busy-wait loops (removed `default` cases in select statements)
@@ -188,6 +202,9 @@ Images published to:
 - Google transcriber is stub implementation (returns "not implemented")
 - Whisper transcriber fully implemented but requires whisper.cpp binary
 - Default uses mock transcription for development
+- **Discord API limitation**: Users already speaking when bot joins need to toggle mic once for identification
+  - This is a fundamental Discord API constraint - VoiceSpeakingUpdate only fires on state change
+  - Bot displays "Unknown-XXXXX" for unmapped users until they toggle mic
 
 ## Performance Characteristics
 - Binary size: ~15MB (static with all dependencies)

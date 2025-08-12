@@ -364,7 +364,6 @@ func (vb *VoiceBot) voiceSpeakingUpdate(vc *discordgo.VoiceConnection, vsu *disc
 	}).Info(fmt.Sprintf("✅ User %s speaking - SSRC mapped via VoiceSpeakingUpdate (DETERMINISTIC)", action))
 }
 
-
 // GetUserBySSRC returns user information for a given SSRC (implements UserResolver)
 // DETERMINISTIC APPROACH: Only returns exact mappings from VoiceSpeakingUpdate events
 func (vb *VoiceBot) GetUserBySSRC(ssrc uint32) (userID, username, nickname string) {
