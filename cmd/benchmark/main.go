@@ -360,15 +360,13 @@ func benchmarkMemoryUsage() BenchmarkResults {
 	}()
 	
 	for time.Since(start) < duration {
-		select {
-		case <-ticker.C:
-			var memStats runtime.MemStats
-			runtime.ReadMemStats(&memStats)
-			current := memStats.Alloc
-			samples = append(samples, current)
-			if current > maxMemory {
-				maxMemory = current
-			}
+		<-ticker.C
+		var memStats runtime.MemStats
+		runtime.ReadMemStats(&memStats)
+		current := memStats.Alloc
+		samples = append(samples, current)
+		if current > maxMemory {
+			maxMemory = current
 		}
 	}
 	
