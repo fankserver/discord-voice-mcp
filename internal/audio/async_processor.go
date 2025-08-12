@@ -39,6 +39,7 @@ const (
 // UserResolver interface for resolving SSRC to user information
 type UserResolver interface {
 	GetUserBySSRC(ssrc uint32) (userID, username, nickname string)
+	RegisterAudioPacket(ssrc uint32, packetSize int) // Track incoming audio for intelligent mapping
 }
 
 // AsyncProcessor handles audio capture and transcription asynchronously
@@ -164,11 +165,14 @@ func (p *AsyncProcessor) ProcessVoiceReceive(vc *discordgo.VoiceConnection, sess
 		p.metrics.PacketsReceived++
 		p.metrics.mu.Unlock()
 
+		// Register packet with resolver for intelligent mapping
+		userResolver.RegisterAudioPacket(packet.SSRC, len(packet.Opus))
+
 		// Get user info
 		userID, username, nickname := userResolver.GetUserBySSRC(packet.SSRC)
 
 		// Get or create buffer for this user
-		buffer := p.getOrCreateBuffer(packet.SSRC, userID, username, nickname, activeSessionID, sessionManager)
+		buffer := p.getOrCreateBuffer(packet.SSRC, userID, username, nickname, activeSessionID, sessionManager, userResolver)
 
 		// Check if this is a comfort noise packet
 		isSilence := len(packet.Opus) <= comfortNoisePacketMaxSize
@@ -225,7 +229,7 @@ func (p *AsyncProcessor) ProcessVoiceReceive(vc *discordgo.VoiceConnection, sess
 }
 
 // getOrCreateBuffer gets or creates a buffer for a user
-func (p *AsyncProcessor) getOrCreateBuffer(ssrc uint32, userID, username, nickname string, sessionID string, sessionManager *session.Manager) *SmartUserBuffer {
+func (p *AsyncProcessor) getOrCreateBuffer(ssrc uint32, userID, username, nickname string, sessionID string, sessionManager *session.Manager, userResolver UserResolver) *SmartUserBuffer {
 	p.mu.RLock()
 	buffer, exists := p.buffers[ssrc]
 	p.mu.RUnlock()
@@ -256,6 +260,7 @@ func (p *AsyncProcessor) getOrCreateBuffer(ssrc uint32, userID, username, nickna
 
 	buffer = NewSmartUserBufferWithCallback(userID, displayName, ssrc, p.segmentChan, p.config.BufferConfig, onTranscriptionComplete)
 	buffer.SetSessionID(sessionID)
+	buffer.SetUserResolver(userResolver) // Set the resolver for dynamic username resolution
 	p.buffers[ssrc] = buffer
 
 	p.metrics.mu.Lock()

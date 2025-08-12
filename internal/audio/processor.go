@@ -17,6 +17,8 @@ import (
 )
 
 // UserResolver is defined in async_processor.go
+// Implements: GetUserBySSRC(ssrc uint32) (userID, username, nickname string)
+//            RegisterAudioPacket(ssrc uint32, packetSize int)
 
 const (
 	// Audio configuration (these are fixed by Discord)
@@ -178,6 +180,9 @@ func (p *Processor) ProcessVoiceReceive(vc *discordgo.VoiceConnection, sessionMa
 			"packet_num": packetCount,
 			"is_silence": isSilence,
 		}).Debug("Received voice packet")
+
+		// Register packet with resolver for intelligent mapping
+		userResolver.RegisterAudioPacket(packet.SSRC, len(packet.Opus))
 
 		// Get or create stream for user
 		userID, username, nickname := userResolver.GetUserBySSRC(packet.SSRC)
