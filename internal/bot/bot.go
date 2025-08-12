@@ -364,15 +364,6 @@ func (vb *VoiceBot) voiceSpeakingUpdate(vc *discordgo.VoiceConnection, vsu *disc
 	}).Info(fmt.Sprintf("✅ User %s speaking - SSRC mapped via VoiceSpeakingUpdate (DETERMINISTIC)", action))
 }
 
-// populateUsersInChannel is deprecated - replaced by SSRCManager.PopulateExpectedUsers
-
-// Track recently logged unknown SSRCs to avoid spam
-var unknownSSRCLogCache = struct {
-	sync.RWMutex
-	lastLogged map[uint32]time.Time
-}{
-	lastLogged: make(map[uint32]time.Time),
-}
 
 // GetUserBySSRC returns user information for a given SSRC (implements UserResolver)
 // DETERMINISTIC APPROACH: Only returns exact mappings from VoiceSpeakingUpdate events
