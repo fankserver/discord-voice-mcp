@@ -21,7 +21,7 @@ type UserInfo struct {
 type VoiceBot struct {
 	discord        *discordgo.Session
 	sessions       *session.Manager
-	audioProcessor *audio.Processor
+	audioProcessor audio.VoiceProcessor // Now uses interface for flexibility
 	voiceConn      *discordgo.VoiceConnection
 	followUserID   string               // User ID to follow
 	autoFollow     bool                 // Whether to auto-follow user
@@ -30,7 +30,7 @@ type VoiceBot struct {
 }
 
 // New creates a new VoiceBot instance
-func New(token string, sessionManager *session.Manager, audioProcessor *audio.Processor) (*VoiceBot, error) {
+func New(token string, sessionManager *session.Manager, audioProcessor audio.VoiceProcessor) (*VoiceBot, error) {
 	discord, err := discordgo.New("Bot " + token)
 	if err != nil {
 		return nil, fmt.Errorf("error creating Discord session: %w", err)

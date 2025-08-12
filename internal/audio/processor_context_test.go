@@ -21,9 +21,21 @@ func (m *MockContextAwareTranscriber) Transcribe(audio []byte) (string, error) {
 	return args.String(0), args.Error(1)
 }
 
-func (m *MockContextAwareTranscriber) TranscribeWithContext(audio []byte, opts transcriber.TranscribeOptions) (string, error) {
+func (m *MockContextAwareTranscriber) TranscribeWithContext(audio []byte, opts transcriber.TranscriptionOptions) (*transcriber.TranscriptResult, error) {
 	args := m.Called(audio, opts)
-	return args.String(0), args.Error(1)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return &transcriber.TranscriptResult{
+		Text:       args.String(0),
+		Confidence: 0.95,
+		Language:   "en",
+		Duration:   10 * time.Millisecond,
+	}, args.Error(1)
+}
+
+func (m *MockContextAwareTranscriber) IsReady() bool {
+	return true
 }
 
 func (m *MockContextAwareTranscriber) Close() error {
@@ -48,8 +60,8 @@ func TestContextPreservation(t *testing.T) {
 	}
 
 	// First transcription - no context
-	mockTranscriber.On("TranscribeWithContext", mock.Anything, mock.MatchedBy(func(opts transcriber.TranscribeOptions) bool {
-		return opts.PreviousTranscript == ""
+	mockTranscriber.On("TranscribeWithContext", mock.Anything, mock.MatchedBy(func(opts transcriber.TranscriptionOptions) bool {
+		return opts.PreviousContext == ""
 	})).Return("First transcript", nil).Once()
 
 	processor.transcribeAndClear(stream, sessionManager, sessionID)
@@ -60,8 +72,8 @@ func TestContextPreservation(t *testing.T) {
 
 	// Second transcription - should have context
 	stream.Buffer.Write(make([]byte, 1000))
-	mockTranscriber.On("TranscribeWithContext", mock.Anything, mock.MatchedBy(func(opts transcriber.TranscribeOptions) bool {
-		return opts.PreviousTranscript == "First transcript"
+	mockTranscriber.On("TranscribeWithContext", mock.Anything, mock.MatchedBy(func(opts transcriber.TranscriptionOptions) bool {
+		return opts.PreviousContext == "First transcript"
 	})).Return("Second transcript", nil).Once()
 
 	processor.transcribeAndClear(stream, sessionManager, sessionID)
@@ -94,8 +106,8 @@ func TestContextExpiration(t *testing.T) {
 	}
 
 	// Should NOT use expired context
-	mockTranscriber.On("TranscribeWithContext", mock.Anything, mock.MatchedBy(func(opts transcriber.TranscribeOptions) bool {
-		return opts.PreviousTranscript == ""
+	mockTranscriber.On("TranscribeWithContext", mock.Anything, mock.MatchedBy(func(opts transcriber.TranscriptionOptions) bool {
+		return opts.PreviousContext == ""
 	})).Return("New transcript", nil).Once()
 
 	processor.transcribeAndClear(stream, sessionManager, sessionID)
@@ -128,8 +140,8 @@ func TestContextNotExpired(t *testing.T) {
 	}
 
 	// Should use recent context
-	mockTranscriber.On("TranscribeWithContext", mock.Anything, mock.MatchedBy(func(opts transcriber.TranscribeOptions) bool {
-		return opts.PreviousTranscript == "Recent context"
+	mockTranscriber.On("TranscribeWithContext", mock.Anything, mock.MatchedBy(func(opts transcriber.TranscriptionOptions) bool {
+		return opts.PreviousContext == "Recent context"
 	})).Return("New transcript", nil).Once()
 
 	processor.transcribeAndClear(stream, sessionManager, sessionID)
@@ -165,16 +177,16 @@ func TestMultiUserContextIsolation(t *testing.T) {
 	processor.activeStreams["stream-2"] = stream2
 
 	// User 1 transcription should use User 1's context
-	mockTranscriber.On("TranscribeWithContext", mock.Anything, mock.MatchedBy(func(opts transcriber.TranscribeOptions) bool {
-		return opts.PreviousTranscript == "User 1 context"
+	mockTranscriber.On("TranscribeWithContext", mock.Anything, mock.MatchedBy(func(opts transcriber.TranscriptionOptions) bool {
+		return opts.PreviousContext == "User 1 context"
 	})).Return("User 1 new", nil).Once()
 
 	processor.transcribeAndClear(stream1, sessionManager, sessionID)
 
 	// User 2 transcription should use User 2's context
 	stream2.Buffer.Write(make([]byte, 1000)) // Add data back
-	mockTranscriber.On("TranscribeWithContext", mock.Anything, mock.MatchedBy(func(opts transcriber.TranscribeOptions) bool {
-		return opts.PreviousTranscript == "User 2 context"
+	mockTranscriber.On("TranscribeWithContext", mock.Anything, mock.MatchedBy(func(opts transcriber.TranscriptionOptions) bool {
+		return opts.PreviousContext == "User 2 context"
 	})).Return("User 2 new", nil).Once()
 
 	processor.transcribeAndClear(stream2, sessionManager, sessionID)
@@ -205,7 +217,7 @@ func TestOverlapBufferManagement(t *testing.T) {
 	}
 
 	// First transcription - should create overlap buffer
-	mockTranscriber.On("TranscribeWithContext", mock.Anything, mock.MatchedBy(func(opts transcriber.TranscribeOptions) bool {
+	mockTranscriber.On("TranscribeWithContext", mock.Anything, mock.MatchedBy(func(opts transcriber.TranscriptionOptions) bool {
 		// Since overlap is disabled by default (0ms), this should be nil
 		return true
 	})).Return("Transcript", nil).Once()

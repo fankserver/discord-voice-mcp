@@ -8,15 +8,13 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/sirupsen/logrus"
 )
 
-// Transcriber interface for different transcription providers
-type Transcriber interface {
-	Transcribe(audio []byte) (string, error)
-	Close() error
-}
+// Note: This is the old interface kept for backward compatibility
+// New code should use the interface in interface.go
 
 // WhisperTranscriber uses whisper.cpp for transcription
 type WhisperTranscriber struct {
@@ -99,27 +97,70 @@ func NewWhisperTranscriber(modelPath string) (*WhisperTranscriber, error) {
 	}, nil
 }
 
-// Transcribe uses whisper.cpp CLI for transcription
+// Transcribe implements the basic Transcriber interface
 func (wt *WhisperTranscriber) Transcribe(audio []byte) (string, error) {
-	return wt.TranscribeWithContext(audio, TranscribeOptions{})
+	result, err := wt.TranscribeWithContext(audio, TranscriptionOptions{})
+	if err != nil {
+		return "", err
+	}
+	return result.Text, nil
 }
 
-// TranscribeWithContext uses whisper.cpp CLI with context for better accuracy
-func (wt *WhisperTranscriber) TranscribeWithContext(audio []byte, opts TranscribeOptions) (string, error) {
+// TranscribeWithContext implements the new Transcriber interface with enhanced options
+func (wt *WhisperTranscriber) TranscribeWithContext(audio []byte, opts TranscriptionOptions) (*TranscriptResult, error) {
+	startTime := time.Now()
+
+	// Convert old TranscribeOptions if needed for backward compatibility
+	var previousTranscript string
+	var overlapAudio []byte
+
+	// Use new options
+	previousTranscript = opts.PreviousContext
+	overlapAudio = opts.OverlapAudio
+	if opts.Language != "" && opts.Language != "auto" {
+		wt.language = opts.Language
+	}
+
+	// Call the legacy implementation
+	text, err := wt.transcribeInternal(audio, previousTranscript, overlapAudio)
+	if err != nil {
+		return nil, err
+	}
+
+	// Build result
+	return &TranscriptResult{
+		Text:       text,
+		Confidence: 0.95, // Whisper doesn't provide confidence scores
+		Language:   wt.language,
+		Duration:   time.Since(startTime),
+	}, nil
+}
+
+// IsReady implements the new Transcriber interface
+func (wt *WhisperTranscriber) IsReady() bool {
+	// Check if model file still exists and is accessible
+	if _, err := os.Stat(wt.modelPath); err != nil {
+		return false
+	}
+	return true
+}
+
+// transcribeInternal is the internal implementation (legacy)
+func (wt *WhisperTranscriber) transcribeInternal(audio []byte, previousTranscript string, overlapAudio []byte) (string, error) {
 	// Use only the current audio chunk without overlap
 	// The overlap context is now provided via the --prompt parameter
 	finalAudio := audio
 
 	// Note: We don't prepend overlap audio anymore as it causes duplicates
 	// Context is maintained through the prompt parameter instead
-	if len(opts.OverlapAudio) > 0 {
+	if len(overlapAudio) > 0 {
 		logrus.Debug("Overlap audio available but not prepended (using prompt for context instead)")
 	}
 
 	logrus.WithFields(logrus.Fields{
 		"audio_bytes": len(finalAudio),
 		"model":       wt.modelPath,
-		"has_context": opts.PreviousTranscript != "",
+		"has_context": previousTranscript != "",
 	}).Debug("WhisperTranscriber: Starting transcription")
 
 	// Convert PCM to WAV format using ffmpeg
@@ -168,7 +209,7 @@ func (wt *WhisperTranscriber) TranscribeWithContext(audio []byte, opts Transcrib
 	// This helps maintain continuity across chunk boundaries
 	// IMPORTANT: Use --prompt (not -p) for text prompts
 	// The -p flag expects an integer for parallel processing
-	if prompt := CreateContextPrompt(opts.PreviousTranscript); prompt != "" {
+	if prompt := CreateContextPrompt(previousTranscript); prompt != "" {
 		// Log the exact prompt for debugging
 		logrus.WithFields(logrus.Fields{
 			"prompt":       prompt,
@@ -233,6 +274,21 @@ func (gt *GoogleTranscriber) Transcribe(audio []byte) (string, error) {
 	return "Google transcription not implemented in PoC", nil
 }
 
+func (gt *GoogleTranscriber) TranscribeWithContext(audio []byte, opts TranscriptionOptions) (*TranscriptResult, error) {
+	// TODO: Implement Google Speech-to-Text with speech context
+	return &TranscriptResult{
+		Text:       "Google transcription not implemented in PoC",
+		Confidence: 0.0,
+		Language:   "en",
+		Duration:   time.Millisecond,
+	}, nil
+}
+
+func (gt *GoogleTranscriber) IsReady() bool {
+	// TODO: Check Google client status
+	return false
+}
+
 func (gt *GoogleTranscriber) Close() error {
 	return nil
 }
@@ -243,6 +299,25 @@ type MockTranscriber struct{}
 func (mt *MockTranscriber) Transcribe(audio []byte) (string, error) {
 	logrus.WithField("audio_bytes", len(audio)).Debug("MockTranscriber: Generating mock transcript")
 	return fmt.Sprintf("[Mock transcript: %d bytes of audio]", len(audio)), nil
+}
+
+func (mt *MockTranscriber) TranscribeWithContext(audio []byte, opts TranscriptionOptions) (*TranscriptResult, error) {
+	startTime := time.Now()
+	text := fmt.Sprintf("[Mock transcript: %d bytes of audio]", len(audio))
+	if opts.PreviousContext != "" {
+		text = fmt.Sprintf("[Mock transcript with context: %d bytes]", len(audio))
+	}
+
+	return &TranscriptResult{
+		Text:       text,
+		Confidence: 1.0,
+		Language:   "en",
+		Duration:   time.Since(startTime),
+	}, nil
+}
+
+func (mt *MockTranscriber) IsReady() bool {
+	return true
 }
 
 func (mt *MockTranscriber) Close() error {

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/fankserver/discord-voice-mcp/internal/session"
+	"github.com/fankserver/discord-voice-mcp/pkg/transcriber"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 )
@@ -23,6 +24,19 @@ type MockTranscriber struct {
 func (m *MockTranscriber) Transcribe(audioData []byte) (string, error) {
 	args := m.Called(audioData)
 	return args.String(0), args.Error(1)
+}
+
+func (m *MockTranscriber) TranscribeWithContext(audio []byte, opts transcriber.TranscriptionOptions) (*transcriber.TranscriptResult, error) {
+	args := m.Called(audio, opts)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*transcriber.TranscriptResult), args.Error(1)
+}
+
+func (m *MockTranscriber) IsReady() bool {
+	args := m.Called()
+	return args.Bool(0)
 }
 
 func (m *MockTranscriber) Close() error {
@@ -87,8 +101,10 @@ func TestProcessorBufferThreshold(t *testing.T) {
 
 			// Setup mock expectations
 			if tt.shouldTrigger {
-				// Expect transcription to be called
-				mockTranscriber.On("Transcribe", mock.Anything).Return("test transcription", nil).Once()
+				// Expect transcription to be called with context
+				mockTranscriber.On("TranscribeWithContext", mock.Anything, mock.Anything).Return(&transcriber.TranscriptResult{
+					Text: "test transcription",
+				}, nil).Once()
 			}
 
 			// Simulate the threshold check logic
@@ -106,7 +122,7 @@ func TestProcessorBufferThreshold(t *testing.T) {
 				// Buffer should be cleared after transcription
 				assert.Equal(t, 0, stream.Buffer.Len(), "Buffer should be cleared after transcription")
 			} else {
-				mockTranscriber.AssertNotCalled(t, "Transcribe")
+				mockTranscriber.AssertNotCalled(t, "TranscribeWithContext")
 				// Buffer should remain unchanged
 				assert.Equal(t, tt.bufferSize, stream.Buffer.Len(), "Buffer should remain unchanged when threshold not met")
 			}
@@ -154,7 +170,9 @@ func TestProcessorBufferGrowthAndReset(t *testing.T) {
 		"Buffer should be exactly at threshold")
 
 	// Setup mock for transcription
-	mockTranscriber.On("Transcribe", mock.Anything).Return("test transcription", nil).Once()
+	mockTranscriber.On("TranscribeWithContext", mock.Anything, mock.Anything).Return(&transcriber.TranscriptResult{
+		Text: "test transcription",
+	}, nil).Once()
 
 	// Trigger transcription
 	processor.transcribeAndClear(stream, sessionManager, sessionID)
@@ -170,7 +188,9 @@ func TestProcessorConcurrentAccess(t *testing.T) {
 	processor := NewProcessor(mockTranscriber)
 
 	// Setup mock to handle multiple transcriptions
-	mockTranscriber.On("Transcribe", mock.Anything).Return("test", nil).Maybe()
+	mockTranscriber.On("TranscribeWithContext", mock.Anything, mock.Anything).Return(&transcriber.TranscriptResult{
+		Text: "test",
+	}, nil).Maybe()
 	mockTranscriber.On("Close").Return(nil).Maybe()
 
 	var wg sync.WaitGroup
@@ -243,7 +263,7 @@ func TestTranscribeAndClearEmptyBuffer(t *testing.T) {
 	// Should not call transcriber for empty buffer
 	processor.transcribeAndClear(stream, sessionManager, sessionID)
 
-	mockTranscriber.AssertNotCalled(t, "Transcribe")
+	mockTranscriber.AssertNotCalled(t, "TranscribeWithContext")
 }
 
 func TestTranscribeAndClearAddsToSession(t *testing.T) {
@@ -260,7 +280,9 @@ func TestTranscribeAndClearAddsToSession(t *testing.T) {
 	}
 
 	expectedText := "Hello, this is a test transcription"
-	mockTranscriber.On("Transcribe", mock.Anything).Return(expectedText, nil).Once()
+	mockTranscriber.On("TranscribeWithContext", mock.Anything, mock.Anything).Return(&transcriber.TranscriptResult{
+		Text: expectedText,
+	}, nil).Once()
 
 	// Perform transcription
 	processor.transcribeAndClear(stream, sessionManager, sessionID)
@@ -344,7 +366,9 @@ func TestSilenceDetection(t *testing.T) {
 	}
 
 	// Set up mock expectation for transcription
-	mockTranscriber.On("Transcribe", mock.Anything).Return("silence detected transcript", nil).Once()
+	mockTranscriber.On("TranscribeWithContext", mock.Anything, mock.Anything).Return(&transcriber.TranscriptResult{
+		Text: "silence detected transcript",
+	}, nil).Once()
 
 	// Start silence timer
 	stream.startSilenceTimer(processor, sessionManager, sessionID)
@@ -393,7 +417,7 @@ func TestSilenceTimerCancellation(t *testing.T) {
 	time.Sleep(150 * time.Millisecond)
 
 	// Transcription should NOT have been called
-	mockTranscriber.AssertNotCalled(t, "Transcribe")
+	mockTranscriber.AssertNotCalled(t, "TranscribeWithContext")
 }
 
 // TestSilenceTimerNotStartedForSmallBuffer tests that silence timer doesn't start for buffers below minimum
@@ -428,7 +452,7 @@ func TestSilenceTimerNotStartedForSmallBuffer(t *testing.T) {
 	}
 
 	// Transcription should NOT be called for small buffers
-	mockTranscriber.AssertNotCalled(t, "Transcribe")
+	mockTranscriber.AssertNotCalled(t, "TranscribeWithContext")
 }
 
 // TestMultipleSilenceTimers tests that multiple silence timers don't interfere
@@ -490,7 +514,9 @@ func TestTranscribeAndClearWithSilenceTimer(t *testing.T) {
 	stream.silenceTimer = time.NewTimer(1 * time.Hour) // Long timer that should be cancelled
 
 	// Setup mock
-	mockTranscriber.On("Transcribe", mock.Anything).Return("test", nil).Once()
+	mockTranscriber.On("TranscribeWithContext", mock.Anything, mock.Anything).Return(&transcriber.TranscriptResult{
+		Text: "test",
+	}, nil).Once()
 
 	// Call transcribeAndClear
 	processor.transcribeAndClear(stream, sessionManager, sessionID)
@@ -558,10 +584,12 @@ func TestConcurrentTranscriptionPrevention(t *testing.T) {
 
 	// Setup mock to simulate slow transcription
 	slowTranscription := make(chan bool)
-	mockTranscriber.On("Transcribe", mock.Anything).Run(func(args mock.Arguments) {
+	mockTranscriber.On("TranscribeWithContext", mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
 		// Block until we signal
 		<-slowTranscription
-	}).Return("test", nil).Once()
+	}).Return(&transcriber.TranscriptResult{
+		Text: "test",
+	}, nil).Once()
 
 	// Start first transcription in goroutine
 	go processor.transcribeAndClear(stream, sessionManager, sessionID)
@@ -582,8 +610,8 @@ func TestConcurrentTranscriptionPrevention(t *testing.T) {
 	// Give time for cleanup
 	time.Sleep(10 * time.Millisecond)
 
-	// Verify Transcribe was only called once
-	mockTranscriber.AssertNumberOfCalls(t, "Transcribe", 1)
+	// Verify TranscribeWithContext was only called once
+	mockTranscriber.AssertNumberOfCalls(t, "TranscribeWithContext", 1)
 }
 
 // TestTranscriptionErrorHandling tests graceful handling of transcription errors
@@ -605,7 +633,7 @@ func TestTranscriptionErrorHandling(t *testing.T) {
 	assert.NoError(t, err)
 
 	// Setup mock to return error
-	mockTranscriber.On("Transcribe", mock.Anything).Return("", errors.New("transcription failed"))
+	mockTranscriber.On("TranscribeWithContext", mock.Anything, mock.Anything).Return((*transcriber.TranscriptResult)(nil), errors.New("transcription failed"))
 
 	// Call transcribeAndClear
 	processor.transcribeAndClear(stream, sessionManager, sessionID)
@@ -639,7 +667,9 @@ func TestTranscribeAndClearEmptyTranscriptionResult(t *testing.T) {
 	}
 
 	// Setup mock to return empty string (e.g., silence or unrecognizable audio)
-	mockTranscriber.On("Transcribe", mock.Anything).Return("", nil)
+	mockTranscriber.On("TranscribeWithContext", mock.Anything, mock.Anything).Return(&transcriber.TranscriptResult{
+		Text: "",
+	}, nil)
 
 	// Call transcribeAndClear
 	processor.transcribeAndClear(stream, sessionManager, sessionID)
@@ -668,13 +698,15 @@ func TestIsTranscribingFlagReset(t *testing.T) {
 	}
 
 	// Test 1: Flag reset after successful transcription
-	mockTranscriber.On("Transcribe", mock.Anything).Return("success", nil).Once()
+	mockTranscriber.On("TranscribeWithContext", mock.Anything, mock.Anything).Return(&transcriber.TranscriptResult{
+		Text: "success",
+	}, nil).Once()
 	processor.transcribeAndClear(stream, sessionManager, sessionID)
 	assert.False(t, stream.isTranscribing, "Flag should be reset after success")
 
 	// Test 2: Flag reset after transcription error
 	stream.Buffer.Write(make([]byte, 1000)) // Add data back
-	mockTranscriber.On("Transcribe", mock.Anything).Return("", errors.New("error")).Once()
+	mockTranscriber.On("TranscribeWithContext", mock.Anything, mock.Anything).Return((*transcriber.TranscriptResult)(nil), errors.New("error")).Once()
 	processor.transcribeAndClear(stream, sessionManager, sessionID)
 	assert.False(t, stream.isTranscribing, "Flag should be reset after error")
 

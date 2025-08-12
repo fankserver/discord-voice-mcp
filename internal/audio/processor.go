@@ -16,10 +16,7 @@ import (
 	"layeh.com/gopus"
 )
 
-// UserResolver interface for resolving SSRC to user information
-type UserResolver interface {
-	GetUserBySSRC(ssrc uint32) (userID, username, nickname string)
-}
+// UserResolver is defined in async_processor.go
 
 const (
 	// Audio configuration (these are fixed by Discord)
@@ -28,13 +25,12 @@ const (
 	frameSize  = 960 // 20ms @ 48kHz
 
 	// Default values (can be overridden by environment variables)
-	// Note: For better transcription accuracy, especially with non-English languages,
-	// consider increasing buffer duration to 5-10 seconds to maintain sentence context
-	defaultBufferDurationSec    = 3    // 3 seconds provides good balance with prompt context
-	defaultSilenceTimeoutMs     = 1500 // 1.5 seconds for natural speech pauses
+	// Note: Balanced for natural speech with responsive sentence detection
+	defaultBufferDurationSec    = 4    // 4 seconds for complete phrases (balanced from 3s/5s)
+	defaultSilenceTimeoutMs     = 1200 // 1.2 seconds to match IntelligentVAD sentence detection (balanced)
 	defaultMinAudioMs           = 100  // Default minimum audio in milliseconds
 	defaultOverlapMs            = 0    // Disabled - audio overlap not needed with prompt context
-	defaultContextExpirationSec = 10   // Clear context after 10 seconds of no activity
+	defaultContextExpirationSec = 12   // Clear context after 12 seconds of no activity (balanced)
 )
 
 // Configurable variables (set from environment or defaults)
@@ -110,6 +106,17 @@ func init() {
 		"overlap_ms":             overlapMs,
 		"context_expiration_sec": contextExpirationSec,
 	}).Info("Audio processor configuration loaded")
+
+	// Log IntelligentVAD settings for debugging natural speech detection
+	vadConfig := NewIntelligentVADConfig()
+	logrus.WithFields(logrus.Fields{
+		"min_speech_duration_ms":   vadConfig.MinSpeechDuration.Milliseconds(),
+		"max_silence_in_speech_ms": vadConfig.MaxSilenceInSpeech.Milliseconds(),
+		"sentence_end_silence_ms":  vadConfig.SentenceEndSilence.Milliseconds(),
+		"max_segment_duration_s":   vadConfig.MaxSegmentDuration.Seconds(),
+		"target_duration_s":        vadConfig.TargetDuration.Seconds(),
+		"energy_drop_ratio":        vadConfig.EnergyDropRatio,
+	}).Info("IntelligentVAD configuration loaded")
 }
 
 // Processor handles audio capture and transcription
@@ -417,14 +424,15 @@ func (p *Processor) transcribeAndClear(stream *Stream, sessionManager *session.M
 	}).Info("Starting transcription")
 
 	// Transcribe audio with context for better accuracy
-	text, err := transcriber.TranscribeWithContext(p.transcriber, audioData, transcriber.TranscribeOptions{
-		PreviousTranscript: lastTranscript,
-		OverlapAudio:       stream.overlapBuffer,
+	result, err := p.transcriber.TranscribeWithContext(audioData, transcriber.TranscriptionOptions{
+		PreviousContext: lastTranscript,
+		OverlapAudio:    stream.overlapBuffer,
 	})
 	if err != nil {
 		logrus.WithError(err).Error("Error transcribing audio")
 		return
 	}
+	text := result.Text
 
 	logrus.WithFields(logrus.Fields{
 		"text_length": len(text),

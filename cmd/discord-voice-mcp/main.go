@@ -127,9 +127,10 @@ func main() {
 		}
 	}()
 
-	// Create audio processor
-	audioProcessor := audio.NewProcessor(trans)
-	logrus.Debug("Audio processor created")
+	// Create async audio processor with new pipeline
+	processorConfig := audio.DefaultProcessorConfig()
+	audioProcessor := audio.NewAsyncProcessor(trans, processorConfig)
+	logrus.Debug("Async audio processor created with non-blocking pipeline")
 
 	// Create bot
 	voiceBot, err := bot.New(Token, sessionManager, audioProcessor)
