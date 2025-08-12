@@ -20,14 +20,14 @@ type UserInfo struct {
 
 // VoiceBot manages Discord voice connections
 type VoiceBot struct {
-	discord        *discordgo.Session
-	sessions       *session.Manager
-	audioProcessor audio.VoiceProcessor // Now uses interface for flexibility
-	voiceConn      *discordgo.VoiceConnection
-	followUserID       string                 // User ID to follow
-	autoFollow         bool                   // Whether to auto-follow user
-	simpleSSRCManager  *SimpleSSRCManager     // Simple deterministic SSRC mapping
-	mu                 sync.Mutex
+	discord           *discordgo.Session
+	sessions          *session.Manager
+	audioProcessor    audio.VoiceProcessor // Now uses interface for flexibility
+	voiceConn         *discordgo.VoiceConnection
+	followUserID      string             // User ID to follow
+	autoFollow        bool               // Whether to auto-follow user
+	simpleSSRCManager *SimpleSSRCManager // Simple deterministic SSRC mapping
+	mu                sync.Mutex
 }
 
 // New creates a new VoiceBot instance
@@ -100,13 +100,13 @@ func (vb *VoiceBot) JoinChannel(guildID, channelID string) error {
 	// Register voice speaking handler on the voice connection
 	vc.AddHandler(vb.voiceSpeakingUpdate)
 	logrus.WithField("handler_count", len(vc.OpusRecv)).Debug("Registered VoiceSpeakingUpdate handler on voice connection")
-	
+
 	// Try to listen for voice data to trigger speaking events
 	go func() {
 		// Small delay to let connection stabilize
 		time.Sleep(500 * time.Millisecond)
-		
-		// Send speaking packet to potentially trigger events  
+
+		// Send speaking packet to potentially trigger events
 		if err := vc.Speaking(true); err != nil {
 			logrus.WithError(err).Debug("Error setting speaking flag")
 		}
@@ -114,7 +114,7 @@ func (vb *VoiceBot) JoinChannel(guildID, channelID string) error {
 		if err := vc.Speaking(false); err != nil {
 			logrus.WithError(err).Debug("Error unsetting speaking flag")
 		}
-		
+
 		logrus.Debug("Triggered speaking state change to activate voice events")
 	}()
 
@@ -289,7 +289,7 @@ func (vb *VoiceBot) voiceSpeakingUpdate(vc *discordgo.VoiceConnection, vsu *disc
 		"ssrc":     vsu.SSRC,
 		"speaking": vsu.Speaking,
 	}).Info("🎤 VoiceSpeakingUpdate event received - This is the ONLY reliable SSRC mapping source")
-	
+
 	// Check for overflow before conversion
 	if vsu.SSRC < 0 || vsu.SSRC > int(^uint32(0)) {
 		logrus.WithField("ssrc", vsu.SSRC).Error("SSRC value out of uint32 range")
@@ -352,7 +352,7 @@ func (vb *VoiceBot) voiceSpeakingUpdate(vc *discordgo.VoiceConnection, vsu *disc
 
 	// Get current statistics
 	stats := vb.simpleSSRCManager.GetStatistics()
-	
+
 	logrus.WithFields(logrus.Fields{
 		"ssrc":           ssrc,
 		"user_id":        vsu.UserID,

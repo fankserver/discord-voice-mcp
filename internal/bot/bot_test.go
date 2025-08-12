@@ -109,8 +109,8 @@ func TestGetUserBySSRC(t *testing.T) {
 	assert.Equal(t, "Unknown-12345", username)
 	assert.Equal(t, "Unknown-12345", nickname)
 
-	// Add a user mapping via the SSRC manager
-	bot.ssrcManager.MapSSRC(ssrc, "user-123", "TestUser", "TestNick")
+	// Add a user mapping via the simple SSRC manager
+	bot.simpleSSRCManager.MapSSRC(ssrc, "user-123", "TestUser", "TestNick")
 
 	// Test with existing mapping
 	userID, username, nickname = bot.GetUserBySSRC(ssrc)
@@ -145,8 +145,8 @@ func TestSSRCMappingConcurrency(t *testing.T) {
 			defer wg.Done()
 			ssrc := uint32(1000 + id)
 
-			// Simulate adding user mapping via SSRC manager
-			bot.ssrcManager.MapSSRC(ssrc, 
+			// Simulate adding user mapping via simple SSRC manager
+			bot.simpleSSRCManager.MapSSRC(ssrc,
 				fmt.Sprintf("user-%d", id),
 				fmt.Sprintf("User%d", id),
 				fmt.Sprintf("Nick%d", id))
@@ -170,8 +170,8 @@ func TestSSRCMappingConcurrency(t *testing.T) {
 	wg.Wait()
 
 	// Verify all mappings were added via statistics
-	stats := bot.ssrcManager.GetStatistics()
-	assert.Equal(t, numGoroutines, stats["confirmed_mappings"])
+	stats := bot.simpleSSRCManager.GetStatistics()
+	assert.Equal(t, numGoroutines, stats["exact_mappings"])
 }
 
 func TestLeaveChannelClearsSSRCMappings(t *testing.T) {
@@ -183,21 +183,21 @@ func TestLeaveChannelClearsSSRCMappings(t *testing.T) {
 	bot, err := New("test-token", sessionManager, audioProcessor)
 	assert.NoError(t, err)
 
-	// Add some SSRC mappings via the manager
-	bot.ssrcManager.MapSSRC(1001, "user1", "User1", "Nick1")
-	bot.ssrcManager.MapSSRC(1002, "user2", "User2", "Nick2")
-	bot.ssrcManager.MapSSRC(1003, "user3", "User3", "Nick3")
+	// Add some SSRC mappings via the simple manager
+	bot.simpleSSRCManager.MapSSRC(1001, "user1", "User1", "Nick1")
+	bot.simpleSSRCManager.MapSSRC(1002, "user2", "User2", "Nick2")
+	bot.simpleSSRCManager.MapSSRC(1003, "user3", "User3", "Nick3")
 
 	// Verify mappings exist
-	stats := bot.ssrcManager.GetStatistics()
-	assert.Equal(t, 3, stats["confirmed_mappings"])
+	stats := bot.simpleSSRCManager.GetStatistics()
+	assert.Equal(t, 3, stats["exact_mappings"])
 
 	// Leave channel (should clear mappings)
 	bot.LeaveChannel()
 
 	// Verify mappings were cleared
-	stats = bot.ssrcManager.GetStatistics()
-	assert.Equal(t, 0, stats["confirmed_mappings"])
+	stats = bot.simpleSSRCManager.GetStatistics()
+	assert.Equal(t, 0, stats["exact_mappings"])
 }
 
 func TestFindUserVoiceChannel(t *testing.T) {

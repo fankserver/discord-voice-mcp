@@ -11,11 +11,11 @@ import (
 // This is the clean, Discord-API-compliant approach that never guesses or deduces mappings
 type SimpleSSRCManager struct {
 	mu sync.RWMutex
-	
+
 	// Exact mappings from VoiceSpeakingUpdate events ONLY
 	ssrcToUser map[uint32]*UserInfo
 	userToSSRC map[string]uint32
-	
+
 	// Guild and channel context
 	guildID   string
 	channelID string
@@ -33,14 +33,14 @@ func NewSimpleSSRCManager() *SimpleSSRCManager {
 func (m *SimpleSSRCManager) SetChannel(guildID, channelID string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	
+
 	m.guildID = guildID
 	m.channelID = channelID
-	
+
 	// Clear mappings when changing channels (start fresh)
 	m.ssrcToUser = make(map[uint32]*UserInfo)
 	m.userToSSRC = make(map[string]uint32)
-	
+
 	logrus.WithFields(logrus.Fields{
 		"guild_id":   guildID,
 		"channel_id": channelID,
@@ -52,17 +52,17 @@ func (m *SimpleSSRCManager) SetChannel(guildID, channelID string) {
 func (m *SimpleSSRCManager) MapSSRC(ssrc uint32, userID string, username string, nickname string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	
+
 	// Store the exact mapping
 	userInfo := &UserInfo{
 		UserID:   userID,
 		Username: username,
 		Nickname: nickname,
 	}
-	
+
 	m.ssrcToUser[ssrc] = userInfo
 	m.userToSSRC[userID] = ssrc
-	
+
 	logrus.WithFields(logrus.Fields{
 		"ssrc":     ssrc,
 		"user_id":  userID,
@@ -76,12 +76,12 @@ func (m *SimpleSSRCManager) MapSSRC(ssrc uint32, userID string, username string,
 func (m *SimpleSSRCManager) GetUserBySSRC(ssrc uint32) (userID, username, nickname string) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	
+
 	// Check for exact mapping from VoiceSpeakingUpdate event
 	if info, exists := m.ssrcToUser[ssrc]; exists {
 		return info.UserID, info.Username, info.Nickname
 	}
-	
+
 	// No exact mapping available - return unknown
 	// This is the deterministic approach: we never guess
 	ssrcStr := fmt.Sprintf("%d", ssrc)
@@ -92,7 +92,7 @@ func (m *SimpleSSRCManager) GetUserBySSRC(ssrc uint32) (userID, username, nickna
 func (m *SimpleSSRCManager) GetStatistics() map[string]int {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	
+
 	return map[string]int{
 		"exact_mappings": len(m.ssrcToUser),
 	}
@@ -102,10 +102,10 @@ func (m *SimpleSSRCManager) GetStatistics() map[string]int {
 func (m *SimpleSSRCManager) Clear() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	
+
 	m.ssrcToUser = make(map[uint32]*UserInfo)
 	m.userToSSRC = make(map[string]uint32)
-	
+
 	logrus.Info("Simple SSRC manager cleared")
 }
 

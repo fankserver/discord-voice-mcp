@@ -79,10 +79,10 @@ func TestSSRCManagerSingleDeduction(t *testing.T) {
 	ssrc := uint32(99999)
 	manager.RegisterAudioPacket(ssrc, 100) // Audio packet (not silence)
 
-	// Since we have 1 unmapped SSRC with audio activity and 1 expected user, 
+	// Since we have 1 unmapped SSRC with audio activity and 1 expected user,
 	// attemptDeduction should have created the mapping automatically
 	userID, username, nickname := manager.GetUserBySSRC(ssrc)
-	
+
 	// Should return the expected user info (deduction created real mapping)
 	assert.Equal(t, "user456", userID)
 	assert.Equal(t, "ExpectedUser", username)
@@ -150,7 +150,7 @@ func TestSSRCManagerClearState(t *testing.T) {
 	// Add various mappings
 	manager.MapSSRC(1001, "user1", "User1", "Nick1")
 	manager.RegisterAudioPacket(2002, 100)
-	
+
 	manager.mu.Lock()
 	manager.expectedUsers["user3"] = &UserInfo{UserID: "user3", Username: "User3", Nickname: "Nick3"}
 	manager.mu.Unlock()
@@ -228,7 +228,7 @@ func TestSSRCManagerConfidenceBasedMapping(t *testing.T) {
 	}
 	manager.expectedUsers["user2"] = &UserInfo{
 		UserID:   "user2",
-		Username: "SecondUser", 
+		Username: "SecondUser",
 		Nickname: "SecondNick",
 	}
 	manager.mu.Unlock()
@@ -239,7 +239,7 @@ func TestSSRCManagerConfidenceBasedMapping(t *testing.T) {
 
 	// SSRC1: High activity user (lots of packets, good quality)
 	for i := 0; i < 50; i++ {
-		time.Sleep(1 * time.Millisecond) // Small delay to allow pattern tracking
+		time.Sleep(1 * time.Millisecond)             // Small delay to allow pattern tracking
 		manager.RegisterAudioPacket(ssrc1, 100+i%20) // Variable packet sizes (natural speech)
 	}
 
@@ -252,7 +252,7 @@ func TestSSRCManagerConfidenceBasedMapping(t *testing.T) {
 	// Initially, should not be mapped (not enough time elapsed)
 	userID1, username1, _ := manager.GetUserBySSRC(ssrc1)
 	userID2, username2, _ := manager.GetUserBySSRC(ssrc2)
-	
+
 	assert.Equal(t, "11111", userID1)
 	assert.Equal(t, "Unknown-11111", username1)
 	assert.Equal(t, "22222", userID2)
@@ -261,14 +261,14 @@ func TestSSRCManagerConfidenceBasedMapping(t *testing.T) {
 	// Wait for enough time to allow confidence-based mapping (15+ seconds)
 	// For testing, we'll artificially trigger confidence-based mapping
 	// by calling attemptConfidenceBasedMapping directly after enough time passes
-	
+
 	// Advance the time of first seen for testing purposes
 	manager.mu.Lock()
 	if metadata, exists := manager.unmappedSSRCs[ssrc1]; exists {
 		metadata.FirstSeen = time.Now().Add(-20 * time.Second) // 20s ago
 	}
 	if metadata, exists := manager.unmappedSSRCs[ssrc2]; exists {
-		metadata.FirstSeen = time.Now().Add(-20 * time.Second) // 20s ago  
+		metadata.FirstSeen = time.Now().Add(-20 * time.Second) // 20s ago
 	}
 	manager.mu.Unlock()
 
@@ -280,17 +280,17 @@ func TestSSRCManagerConfidenceBasedMapping(t *testing.T) {
 			t.Logf("SSRC %d -> User %s: Confidence %.1f, Reasons: %v", ssrc, userID, confidence, reasons)
 		}
 	}
-	
+
 	// Trigger confidence-based mapping manually for testing
 	manager.attemptConfidenceBasedMapping()
 	manager.mu.Unlock()
 
 	// Now should have confidence-based mappings (at least one)
 	stats := manager.GetStatistics()
-	
+
 	// Debug: Log the statistics
 	t.Logf("Statistics after confidence mapping attempt: %+v", stats)
-	
+
 	// Since the confidence might not reach threshold initially, let's at least verify the system works
 	// by checking that confidence scores are being calculated
 	if stats["confirmed_mappings"] == 0 {
@@ -298,7 +298,7 @@ func TestSSRCManagerConfidenceBasedMapping(t *testing.T) {
 		t.Log("But the confidence calculation system should be working")
 		return // Don't fail the test, just log that it's working as designed
 	}
-	
+
 	// If mappings were created, verify they're correct
 	assert.GreaterOrEqual(t, stats["confirmed_mappings"], 1, "Should have created at least one confidence-based mapping")
 	assert.LessOrEqual(t, stats["expected_users"], 1, "Should have reduced expected users count")
@@ -310,7 +310,7 @@ func TestSSRCManagerConfidenceBasedMapping(t *testing.T) {
 	// At least one should be properly mapped now
 	isMapped1 := userID1New != "11111" && username1New != "Unknown-11111"
 	isMapped2 := userID2New != "22222" && username2New != "Unknown-22222"
-	
+
 	assert.True(t, isMapped1 || isMapped2, "At least one SSRC should be confidence-mapped to a real user")
 }
 

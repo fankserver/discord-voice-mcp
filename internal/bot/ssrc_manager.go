@@ -24,7 +24,7 @@ type SSRCManager struct {
 
 	// Reverse mapping for deduction
 	userToSSRC map[string]uint32
-	
+
 	// Track mapping sources for rollback capability
 	mappingSources map[uint32]string // SSRC -> "exact" or "confidence"
 
@@ -36,28 +36,28 @@ type SSRCManager struct {
 
 // SSRCMetadata tracks information about an unmapped SSRC
 type SSRCMetadata struct {
-	SSRC           uint32
-	FirstSeen      time.Time
-	LastSeen       time.Time
-	PacketCount    int
-	AudioActive    bool
+	SSRC              uint32
+	FirstSeen         time.Time
+	LastSeen          time.Time
+	PacketCount       int
+	AudioActive       bool
 	AveragePacketSize int
-	
+
 	// Enhanced pattern tracking for confidence-based mapping
-	SpeakingBursts    []SpeakingBurst // Track speaking segments
-	LastSpeakingStart time.Time       // When current speaking started
-	IsSpeaking        bool            // Currently speaking
-	TotalSpeakingTime time.Duration   // Total time spent speaking
-	TotalSilenceTime  time.Duration   // Total time spent silent
-	LargestPacketSize int             // Peak packet size seen
-	SmallestPacketSize int            // Minimum non-silence packet size
+	SpeakingBursts     []SpeakingBurst // Track speaking segments
+	LastSpeakingStart  time.Time       // When current speaking started
+	IsSpeaking         bool            // Currently speaking
+	TotalSpeakingTime  time.Duration   // Total time spent speaking
+	TotalSilenceTime   time.Duration   // Total time spent silent
+	LargestPacketSize  int             // Peak packet size seen
+	SmallestPacketSize int             // Minimum non-silence packet size
 }
 
 // SpeakingBurst represents a continuous speaking period
 type SpeakingBurst struct {
-	Start    time.Time
-	End      time.Time
-	Duration time.Duration
+	Start         time.Time
+	End           time.Time
+	Duration      time.Duration
 	AvgPacketSize int
 	PacketCount   int
 }
@@ -169,17 +169,17 @@ func (m *SSRCManager) RegisterAudioPacket(ssrc uint32, packetSize int) {
 	metadata, exists := m.unmappedSSRCs[ssrc]
 	if !exists {
 		metadata = &SSRCMetadata{
-			SSRC:              ssrc,
-			FirstSeen:         now,
+			SSRC:               ssrc,
+			FirstSeen:          now,
 			SmallestPacketSize: packetSize,
 			LargestPacketSize:  packetSize,
 		}
 		m.unmappedSSRCs[ssrc] = metadata
 
 		logrus.WithFields(logrus.Fields{
-			"ssrc":              ssrc,
-			"total_unmapped":    len(m.unmappedSSRCs),
-			"expected_users":    len(m.expectedUsers),
+			"ssrc":               ssrc,
+			"total_unmapped":     len(m.unmappedSSRCs),
+			"expected_users":     len(m.expectedUsers),
 			"confirmed_mappings": len(m.ssrcToUser),
 		}).Info("New unmapped SSRC detected")
 	}
@@ -187,7 +187,7 @@ func (m *SSRCManager) RegisterAudioPacket(ssrc uint32, packetSize int) {
 	// Update basic metadata
 	metadata.LastSeen = now
 	metadata.PacketCount++
-	
+
 	// Track packet size patterns
 	if isSpeech {
 		metadata.AudioActive = true
@@ -197,7 +197,7 @@ func (m *SSRCManager) RegisterAudioPacket(ssrc uint32, packetSize int) {
 		if metadata.SmallestPacketSize == 0 || metadata.SmallestPacketSize > packetSize {
 			metadata.SmallestPacketSize = packetSize
 		}
-		
+
 		// Update average packet size
 		if metadata.AveragePacketSize == 0 {
 			metadata.AveragePacketSize = packetSize
@@ -216,7 +216,7 @@ func (m *SSRCManager) RegisterAudioPacket(ssrc uint32, packetSize int) {
 		if !metadata.LastSpeakingStart.IsZero() {
 			duration := now.Sub(metadata.LastSpeakingStart)
 			metadata.TotalSpeakingTime += duration
-			
+
 			burst := SpeakingBurst{
 				Start:         metadata.LastSpeakingStart,
 				End:           now,
@@ -225,7 +225,7 @@ func (m *SSRCManager) RegisterAudioPacket(ssrc uint32, packetSize int) {
 				PacketCount:   1, // Simplified for now
 			}
 			metadata.SpeakingBursts = append(metadata.SpeakingBursts, burst)
-			
+
 			// Limit burst history to prevent memory growth
 			if len(metadata.SpeakingBursts) > 10 {
 				metadata.SpeakingBursts = metadata.SpeakingBursts[1:]
@@ -249,16 +249,16 @@ func (m *SSRCManager) MapSSRC(ssrc uint32, userID string, username string, nickn
 			// Rollback: confidence mapping was wrong
 			if source, hasSource := m.mappingSources[ssrc]; hasSource && source == "confidence" {
 				logrus.WithFields(logrus.Fields{
-					"ssrc":                ssrc,
-					"old_user_id":         existingInfo.UserID,
-					"old_username":        existingInfo.Username,
-					"correct_user_id":     userID,
-					"correct_username":    username,
+					"ssrc":             ssrc,
+					"old_user_id":      existingInfo.UserID,
+					"old_username":     existingInfo.Username,
+					"correct_user_id":  userID,
+					"correct_username": username,
 				}).Warn("Rolling back incorrect confidence-based mapping")
-				
+
 				// Remove old mapping
 				delete(m.userToSSRC, existingInfo.UserID)
-				
+
 				// Re-add old user to expected users if not already there
 				if _, expectedExists := m.expectedUsers[existingInfo.UserID]; !expectedExists {
 					m.expectedUsers[existingInfo.UserID] = existingInfo
@@ -271,15 +271,15 @@ func (m *SSRCManager) MapSSRC(ssrc uint32, userID string, username string, nickn
 	if existingSSRC, exists := m.userToSSRC[userID]; exists && existingSSRC != ssrc {
 		if source, hasSource := m.mappingSources[existingSSRC]; hasSource && source == "confidence" {
 			logrus.WithFields(logrus.Fields{
-				"user_id":        userID,
-				"old_ssrc":       existingSSRC,
-				"correct_ssrc":   ssrc,
+				"user_id":      userID,
+				"old_ssrc":     existingSSRC,
+				"correct_ssrc": ssrc,
 			}).Warn("Rolling back incorrect confidence-based user mapping")
-			
+
 			// Remove old mapping
 			delete(m.ssrcToUser, existingSSRC)
 			delete(m.mappingSources, existingSSRC)
-			
+
 			// Re-add SSRC as unmapped if it had metadata
 			if metadata, exists := m.unmappedSSRCs[existingSSRC]; exists {
 				// Metadata should still be there unless cleaned up
@@ -383,10 +383,10 @@ func (m *SSRCManager) attemptConfidenceBasedMapping() {
 	}
 
 	// Calculate confidence thresholds based on time elapsed
-	minDataAge := 15 * time.Second  // Need at least 15s of data
-	highConfidenceThreshold := 85.0 // 85% confidence required initially
+	minDataAge := 15 * time.Second    // Need at least 15s of data
+	highConfidenceThreshold := 85.0   // 85% confidence required initially
 	mediumConfidenceThreshold := 75.0 // 75% after 30s
-	lowConfidenceThreshold := 65.0   // 65% after 60s
+	lowConfidenceThreshold := 65.0    // 65% after 60s
 
 	now := time.Now()
 	candidates := make([]MappingCandidate, 0)
@@ -400,7 +400,7 @@ func (m *SSRCManager) attemptConfidenceBasedMapping() {
 
 		for userID, userInfo := range m.expectedUsers {
 			confidence, reasons := m.calculateMappingConfidence(metadata, userInfo)
-			
+
 			if confidence > 0 {
 				candidates = append(candidates, MappingCandidate{
 					SSRC:       ssrc,
@@ -498,7 +498,7 @@ func (m *SSRCManager) calculateMappingConfidence(metadata *SSRCMetadata, userInf
 	if len(metadata.SpeakingBursts) > 0 {
 		confidence += 15
 		reasons = append(reasons, "speaking pattern detected")
-		
+
 		// Bonus for consistent speaking patterns
 		if len(metadata.SpeakingBursts) >= 3 {
 			confidence += 10
@@ -517,7 +517,7 @@ func (m *SSRCManager) calculateMappingConfidence(metadata *SSRCMetadata, userInf
 	totalObservationTime := now.Sub(metadata.FirstSeen)
 	if totalObservationTime > 0 {
 		activityRatio := float64(metadata.TotalSpeakingTime) / float64(totalObservationTime)
-		
+
 		if activityRatio > 0.1 && activityRatio < 0.8 { // 10-80% speaking time is normal
 			confidence += 20
 			reasons = append(reasons, "normal activity level")
