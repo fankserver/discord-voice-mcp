@@ -96,11 +96,18 @@ type EventBus struct {
 	buffer       chan Event
 	stopCh       chan struct{}
 	wg           sync.WaitGroup
-	metrics      *EventMetrics
+	metrics      *eventMetricsInternal
 }
 
-// EventMetrics tracks event statistics
+// EventMetrics tracks event statistics (public API)
 type EventMetrics struct {
+	EventsPublished map[EventType]int64
+	EventsDelivered int64
+	EventsDropped   int64
+}
+
+// eventMetricsInternal tracks event statistics with thread safety
+type eventMetricsInternal struct {
 	EventsPublished map[EventType]int64
 	EventsDelivered int64
 	EventsDropped   int64
@@ -113,7 +120,7 @@ func NewEventBus(bufferSize int) *EventBus {
 		handlers: make(map[EventType][]EventHandler),
 		buffer:   make(chan Event, bufferSize),
 		stopCh:   make(chan struct{}),
-		metrics: &EventMetrics{
+		metrics: &eventMetricsInternal{
 			EventsPublished: make(map[EventType]int64),
 		},
 	}

@@ -37,7 +37,7 @@ type AsyncProcessor struct {
 	config ProcessorConfig
 	
 	// Metrics
-	metrics *ProcessorMetrics
+	metrics *processorMetricsInternal
 	
 	// Control
 	stopCh chan struct{}
@@ -66,8 +66,17 @@ func DefaultProcessorConfig() ProcessorConfig {
 	}
 }
 
-// ProcessorMetrics tracks processor performance
+// ProcessorMetrics tracks processor performance (public API)
 type ProcessorMetrics struct {
+	PacketsReceived   int64
+	BytesProcessed    int64
+	SegmentsCreated   int64
+	ActiveBuffers     int
+	TotalTranscripts  int64
+}
+
+// processorMetricsInternal tracks processor performance with thread safety
+type processorMetricsInternal struct {
 	PacketsReceived   int64
 	BytesProcessed    int64
 	SegmentsCreated   int64
@@ -83,7 +92,7 @@ func NewAsyncProcessor(trans transcriber.Transcriber, config ProcessorConfig) *A
 		buffers:     make(map[uint32]*SmartUserBuffer),
 		segmentChan: make(chan *AudioSegment, config.QueueSize),
 		config:      config,
-		metrics:     &ProcessorMetrics{},
+		metrics:     &processorMetricsInternal{},
 		stopCh:      make(chan struct{}),
 		eventBus:    feedback.NewEventBus(config.EventBufferSize),
 	}
@@ -366,7 +375,14 @@ func (p *AsyncProcessor) GetMetrics() ProcessorMetrics {
 	p.metrics.mu.Lock()
 	defer p.metrics.mu.Unlock()
 	
-	metrics := *p.metrics
+	// Create a new metrics struct to avoid copying the mutex
+	metrics := ProcessorMetrics{
+		PacketsReceived:   p.metrics.PacketsReceived,
+		BytesProcessed:    p.metrics.BytesProcessed,
+		SegmentsCreated:   p.metrics.SegmentsCreated,
+		ActiveBuffers:     p.metrics.ActiveBuffers,
+		TotalTranscripts:  p.metrics.TotalTranscripts,
+	}
 	
 	// Add current buffer count
 	p.mu.RLock()
