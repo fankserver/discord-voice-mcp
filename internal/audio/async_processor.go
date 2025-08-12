@@ -2,6 +2,7 @@ package audio
 
 import (
 	"encoding/binary"
+	"math"
 	"sync"
 	"time"
 
@@ -167,6 +168,7 @@ func (p *AsyncProcessor) ProcessVoiceReceive(vc *discordgo.VoiceConnection, sess
 		// Convert PCM to bytes
 		pcmBytes := make([]byte, len(pcm)*2)
 		for i := 0; i < len(pcm); i++ {
+			// #nosec G115 -- int16 to uint16 conversion is safe for audio samples
 			binary.LittleEndian.PutUint16(pcmBytes[i*2:], uint16(pcm[i]))
 		}
 		
@@ -410,7 +412,8 @@ func (p *AsyncProcessor) GetQueueMetrics() pipeline.QueueMetrics {
 		SegmentsFailed:     dispatcherMetrics.SegmentsDropped,
 		TotalProcessTime:   0, // Not tracked by dispatcher
 		AverageProcessTime: dispatcherMetrics.AverageLatency,
-		CurrentQueueDepth:  int32(dispatcherMetrics.SegmentsDispatched - dispatcherMetrics.SegmentsCompleted),
+		// #nosec G115 -- Queue depth calculation bounded by MaxInt32
+		CurrentQueueDepth:  int32(min(dispatcherMetrics.SegmentsDispatched-dispatcherMetrics.SegmentsCompleted, math.MaxInt32)),
 		ActiveWorkers:      dispatcherMetrics.ActiveSpeakers,
 	}
 }

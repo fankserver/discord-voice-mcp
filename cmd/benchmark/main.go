@@ -282,7 +282,7 @@ func benchmarkConcurrentLoad() BenchmarkResults {
 			buffer := audio.NewSmartUserBuffer(
 				fmt.Sprintf("user-%d", id),
 				fmt.Sprintf("User%d", id),
-				uint32(id+1000),
+				uint32(id+1000), // #nosec G115 -- id is small and controlled
 				make(chan *audio.AudioSegment, 100),
 				config,
 			)
@@ -406,6 +406,7 @@ func benchmarkVAD() BenchmarkResults {
 	speechData := make([]int16, audioSize/2) // audioSize bytes = audioSize/2 int16s
 	for i := range speechData {
 		// Simulate speech with higher amplitude variations
+		// #nosec G115 -- Mathematical expression for test data generation within int16 bounds
 		speechData[i] = int16((i*17 + i*i) % 32768)
 	}
 	
