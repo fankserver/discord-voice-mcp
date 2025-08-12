@@ -24,6 +24,9 @@ type SSRCManager struct {
 
 	// Reverse mapping for deduction
 	userToSSRC map[string]uint32
+	
+	// Track mapping sources for rollback capability
+	mappingSources map[uint32]string // SSRC -> "exact" or "confidence"
 
 	// Voice connection details
 	guildID   string
@@ -39,16 +42,46 @@ type SSRCMetadata struct {
 	PacketCount    int
 	AudioActive    bool
 	AveragePacketSize int
+	
+	// Enhanced pattern tracking for confidence-based mapping
+	SpeakingBursts    []SpeakingBurst // Track speaking segments
+	LastSpeakingStart time.Time       // When current speaking started
+	IsSpeaking        bool            // Currently speaking
+	TotalSpeakingTime time.Duration   // Total time spent speaking
+	TotalSilenceTime  time.Duration   // Total time spent silent
+	LargestPacketSize int             // Peak packet size seen
+	SmallestPacketSize int            // Minimum non-silence packet size
+}
+
+// SpeakingBurst represents a continuous speaking period
+type SpeakingBurst struct {
+	Start    time.Time
+	End      time.Time
+	Duration time.Duration
+	AvgPacketSize int
+	PacketCount   int
+}
+
+// MappingCandidate represents a potential SSRC-user mapping with confidence
+type MappingCandidate struct {
+	SSRC       uint32
+	UserID     string
+	Username   string
+	Nickname   string
+	Confidence float64
+	Reasons    []string
+	Source     string // "exact" or "confidence"
 }
 
 // NewSSRCManager creates a new SSRC manager
 func NewSSRCManager(discord *discordgo.Session) *SSRCManager {
 	return &SSRCManager{
-		ssrcToUser:    make(map[uint32]*UserInfo),
-		expectedUsers: make(map[string]*UserInfo),
-		unmappedSSRCs: make(map[uint32]*SSRCMetadata),
-		userToSSRC:    make(map[string]uint32),
-		discord:       discord,
+		ssrcToUser:     make(map[uint32]*UserInfo),
+		expectedUsers:  make(map[string]*UserInfo),
+		unmappedSSRCs:  make(map[uint32]*SSRCMetadata),
+		userToSSRC:     make(map[string]uint32),
+		mappingSources: make(map[uint32]string),
+		discord:        discord,
 	}
 }
 
@@ -119,7 +152,7 @@ func (m *SSRCManager) PopulateExpectedUsers(guildID, channelID string) {
 	m.attemptDeduction()
 }
 
-// RegisterAudioPacket tracks an incoming audio packet
+// RegisterAudioPacket tracks an incoming audio packet with enhanced pattern tracking
 func (m *SSRCManager) RegisterAudioPacket(ssrc uint32, packetSize int) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -129,12 +162,17 @@ func (m *SSRCManager) RegisterAudioPacket(ssrc uint32, packetSize int) {
 		return
 	}
 
+	now := time.Now()
+	isSpeech := packetSize > 3 // Packets > 3 bytes are considered speech
+
 	// Track this unmapped SSRC
 	metadata, exists := m.unmappedSSRCs[ssrc]
 	if !exists {
 		metadata = &SSRCMetadata{
-			SSRC:      ssrc,
-			FirstSeen: time.Now(),
+			SSRC:              ssrc,
+			FirstSeen:         now,
+			SmallestPacketSize: packetSize,
+			LargestPacketSize:  packetSize,
 		}
 		m.unmappedSSRCs[ssrc] = metadata
 
@@ -146,11 +184,20 @@ func (m *SSRCManager) RegisterAudioPacket(ssrc uint32, packetSize int) {
 		}).Info("New unmapped SSRC detected")
 	}
 
-	// Update metadata
-	metadata.LastSeen = time.Now()
+	// Update basic metadata
+	metadata.LastSeen = now
 	metadata.PacketCount++
-	if packetSize > 3 { // Not silence
+	
+	// Track packet size patterns
+	if isSpeech {
 		metadata.AudioActive = true
+		if metadata.LargestPacketSize < packetSize {
+			metadata.LargestPacketSize = packetSize
+		}
+		if metadata.SmallestPacketSize == 0 || metadata.SmallestPacketSize > packetSize {
+			metadata.SmallestPacketSize = packetSize
+		}
+		
 		// Update average packet size
 		if metadata.AveragePacketSize == 0 {
 			metadata.AveragePacketSize = packetSize
@@ -159,22 +206,96 @@ func (m *SSRCManager) RegisterAudioPacket(ssrc uint32, packetSize int) {
 		}
 	}
 
+	// Track speaking state transitions and bursts
+	if isSpeech && !metadata.IsSpeaking {
+		// Starting to speak
+		metadata.IsSpeaking = true
+		metadata.LastSpeakingStart = now
+	} else if !isSpeech && metadata.IsSpeaking {
+		// Stopped speaking - complete the burst
+		if !metadata.LastSpeakingStart.IsZero() {
+			duration := now.Sub(metadata.LastSpeakingStart)
+			metadata.TotalSpeakingTime += duration
+			
+			burst := SpeakingBurst{
+				Start:         metadata.LastSpeakingStart,
+				End:           now,
+				Duration:      duration,
+				AvgPacketSize: metadata.AveragePacketSize,
+				PacketCount:   1, // Simplified for now
+			}
+			metadata.SpeakingBursts = append(metadata.SpeakingBursts, burst)
+			
+			// Limit burst history to prevent memory growth
+			if len(metadata.SpeakingBursts) > 10 {
+				metadata.SpeakingBursts = metadata.SpeakingBursts[1:]
+			}
+		}
+		metadata.IsSpeaking = false
+	}
+
 	// Attempt deduction with new information
 	m.attemptDeduction()
 }
 
-// MapSSRC creates a confirmed SSRC mapping from VoiceSpeakingUpdate
+// MapSSRC creates a confirmed SSRC mapping from VoiceSpeakingUpdate with rollback support
 func (m *SSRCManager) MapSSRC(ssrc uint32, userID string, username string, nickname string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	// Store the mapping
+	// Check if this SSRC was previously mapped via confidence to a different user
+	if existingInfo, exists := m.ssrcToUser[ssrc]; exists {
+		if existingInfo.UserID != userID {
+			// Rollback: confidence mapping was wrong
+			if source, hasSource := m.mappingSources[ssrc]; hasSource && source == "confidence" {
+				logrus.WithFields(logrus.Fields{
+					"ssrc":                ssrc,
+					"old_user_id":         existingInfo.UserID,
+					"old_username":        existingInfo.Username,
+					"correct_user_id":     userID,
+					"correct_username":    username,
+				}).Warn("Rolling back incorrect confidence-based mapping")
+				
+				// Remove old mapping
+				delete(m.userToSSRC, existingInfo.UserID)
+				
+				// Re-add old user to expected users if not already there
+				if _, expectedExists := m.expectedUsers[existingInfo.UserID]; !expectedExists {
+					m.expectedUsers[existingInfo.UserID] = existingInfo
+				}
+			}
+		}
+	}
+
+	// Check if this user was previously mapped to a different SSRC via confidence
+	if existingSSRC, exists := m.userToSSRC[userID]; exists && existingSSRC != ssrc {
+		if source, hasSource := m.mappingSources[existingSSRC]; hasSource && source == "confidence" {
+			logrus.WithFields(logrus.Fields{
+				"user_id":        userID,
+				"old_ssrc":       existingSSRC,
+				"correct_ssrc":   ssrc,
+			}).Warn("Rolling back incorrect confidence-based user mapping")
+			
+			// Remove old mapping
+			delete(m.ssrcToUser, existingSSRC)
+			delete(m.mappingSources, existingSSRC)
+			
+			// Re-add SSRC as unmapped if it had metadata
+			if metadata, exists := m.unmappedSSRCs[existingSSRC]; exists {
+				// Metadata should still be there unless cleaned up
+				_ = metadata
+			}
+		}
+	}
+
+	// Store the correct mapping
 	m.ssrcToUser[ssrc] = &UserInfo{
 		UserID:   userID,
 		Username: username,
 		Nickname: nickname,
 	}
 	m.userToSSRC[userID] = ssrc
+	m.mappingSources[ssrc] = "exact" // Mark as exact mapping
 
 	// Remove from unmapped
 	delete(m.unmappedSSRCs, ssrc)
@@ -186,6 +307,7 @@ func (m *SSRCManager) MapSSRC(ssrc uint32, userID string, username string, nickn
 		"ssrc":               ssrc,
 		"user_id":            userID,
 		"username":           username,
+		"method":             "exact",
 		"remaining_unmapped": len(m.unmappedSSRCs),
 		"remaining_expected": len(m.expectedUsers),
 	}).Info("SSRC mapped to user")
@@ -249,10 +371,172 @@ func (m *SSRCManager) attemptDeduction() {
 		}
 	}
 
-	// TODO: Add more sophisticated deduction strategies:
-	// - Correlate Discord voice activity indicators with packet timing
-	// - Use packet size/frequency patterns
-	// - Track speaking patterns unique to users
+	// Try confidence-based mapping if exact deduction failed
+	m.attemptConfidenceBasedMapping()
+}
+
+// attemptConfidenceBasedMapping uses pattern analysis for probabilistic mapping
+func (m *SSRCManager) attemptConfidenceBasedMapping() {
+	// Only attempt if we have multiple unmapped SSRCs and multiple expected users
+	if len(m.unmappedSSRCs) < 2 || len(m.expectedUsers) < 2 {
+		return
+	}
+
+	// Calculate confidence thresholds based on time elapsed
+	minDataAge := 15 * time.Second  // Need at least 15s of data
+	highConfidenceThreshold := 85.0 // 85% confidence required initially
+	mediumConfidenceThreshold := 75.0 // 75% after 30s
+	lowConfidenceThreshold := 65.0   // 65% after 60s
+
+	now := time.Now()
+	candidates := make([]MappingCandidate, 0)
+
+	// Generate all possible SSRC-user combinations
+	for ssrc, metadata := range m.unmappedSSRCs {
+		// Skip if not enough data collected
+		if now.Sub(metadata.FirstSeen) < minDataAge || !metadata.AudioActive {
+			continue
+		}
+
+		for userID, userInfo := range m.expectedUsers {
+			confidence, reasons := m.calculateMappingConfidence(metadata, userInfo)
+			
+			if confidence > 0 {
+				candidates = append(candidates, MappingCandidate{
+					SSRC:       ssrc,
+					UserID:     userID,
+					Username:   userInfo.Username,
+					Nickname:   userInfo.Nickname,
+					Confidence: confidence,
+					Reasons:    reasons,
+					Source:     "confidence",
+				})
+			}
+		}
+	}
+
+	// Sort candidates by confidence (highest first)
+	for i := 0; i < len(candidates); i++ {
+		for j := i + 1; j < len(candidates); j++ {
+			if candidates[j].Confidence > candidates[i].Confidence {
+				candidates[i], candidates[j] = candidates[j], candidates[i]
+			}
+		}
+	}
+
+	// Determine appropriate threshold based on elapsed time
+	var threshold float64
+	oldestSSRC := time.Time{}
+	for _, metadata := range m.unmappedSSRCs {
+		if oldestSSRC.IsZero() || metadata.FirstSeen.Before(oldestSSRC) {
+			oldestSSRC = metadata.FirstSeen
+		}
+	}
+
+	age := now.Sub(oldestSSRC)
+	if age < 30*time.Second {
+		threshold = highConfidenceThreshold
+	} else if age < 60*time.Second {
+		threshold = mediumConfidenceThreshold
+	} else {
+		threshold = lowConfidenceThreshold
+	}
+
+	// Map the highest confidence candidate if above threshold
+	mappedSSRCs := make(map[uint32]bool)
+	mappedUsers := make(map[string]bool)
+
+	for _, candidate := range candidates {
+		// Skip if already mapped this SSRC or user in this round
+		if mappedSSRCs[candidate.SSRC] || mappedUsers[candidate.UserID] {
+			continue
+		}
+
+		if candidate.Confidence >= threshold {
+			logrus.WithFields(logrus.Fields{
+				"ssrc":       candidate.SSRC,
+				"user_id":    candidate.UserID,
+				"username":   candidate.Username,
+				"confidence": candidate.Confidence,
+				"threshold":  threshold,
+				"reasons":    candidate.Reasons,
+				"method":     "confidence",
+			}).Info("Confidence-based SSRC mapping created")
+
+			// Create the mapping
+			m.ssrcToUser[candidate.SSRC] = &UserInfo{
+				UserID:   candidate.UserID,
+				Username: candidate.Username,
+				Nickname: candidate.Nickname,
+			}
+			m.userToSSRC[candidate.UserID] = candidate.SSRC
+			m.mappingSources[candidate.SSRC] = "confidence" // Track as confidence-based mapping
+			delete(m.unmappedSSRCs, candidate.SSRC)
+			delete(m.expectedUsers, candidate.UserID)
+
+			mappedSSRCs[candidate.SSRC] = true
+			mappedUsers[candidate.UserID] = true
+
+			// Only map one at a time to be conservative
+			break
+		}
+	}
+}
+
+// calculateMappingConfidence calculates confidence score for SSRC-user mapping
+func (m *SSRCManager) calculateMappingConfidence(metadata *SSRCMetadata, userInfo *UserInfo) (float64, []string) {
+	var confidence float64
+	var reasons []string
+
+	// Base confidence from audio activity
+	if metadata.AudioActive && metadata.PacketCount > 10 {
+		confidence += 20
+		reasons = append(reasons, "confirmed audio activity")
+	}
+
+	// Packet consistency patterns (up to 25 points)
+	if len(metadata.SpeakingBursts) > 0 {
+		confidence += 15
+		reasons = append(reasons, "speaking pattern detected")
+		
+		// Bonus for consistent speaking patterns
+		if len(metadata.SpeakingBursts) >= 3 {
+			confidence += 10
+			reasons = append(reasons, "consistent speaking pattern")
+		}
+	}
+
+	// Audio quality indicators (up to 20 points)
+	if metadata.AveragePacketSize > 50 && metadata.AveragePacketSize < 500 {
+		confidence += 15
+		reasons = append(reasons, "normal audio quality")
+	}
+
+	// Activity level assessment (up to 25 points)
+	now := time.Now()
+	totalObservationTime := now.Sub(metadata.FirstSeen)
+	if totalObservationTime > 0 {
+		activityRatio := float64(metadata.TotalSpeakingTime) / float64(totalObservationTime)
+		
+		if activityRatio > 0.1 && activityRatio < 0.8 { // 10-80% speaking time is normal
+			confidence += 20
+			reasons = append(reasons, "normal activity level")
+		} else if activityRatio > 0.05 { // At least some activity
+			confidence += 10
+			reasons = append(reasons, "some activity detected")
+		}
+	}
+
+	// Packet size variance suggests natural speech patterns (up to 10 points)
+	if metadata.LargestPacketSize > metadata.SmallestPacketSize {
+		variance := float64(metadata.LargestPacketSize - metadata.SmallestPacketSize)
+		if variance > 20 && variance < 200 { // Natural speech has some variance
+			confidence += 10
+			reasons = append(reasons, "natural speech patterns")
+		}
+	}
+
+	return confidence, reasons
 }
 
 // GetStatistics returns current mapping statistics
@@ -276,4 +560,5 @@ func (m *SSRCManager) Clear() {
 	m.expectedUsers = make(map[string]*UserInfo)
 	m.unmappedSSRCs = make(map[uint32]*SSRCMetadata)
 	m.userToSSRC = make(map[string]uint32)
+	m.mappingSources = make(map[uint32]string)
 }

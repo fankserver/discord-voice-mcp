@@ -24,10 +24,10 @@ type VoiceBot struct {
 	sessions       *session.Manager
 	audioProcessor audio.VoiceProcessor // Now uses interface for flexibility
 	voiceConn      *discordgo.VoiceConnection
-	followUserID   string               // User ID to follow
-	autoFollow     bool                 // Whether to auto-follow user
-	ssrcManager    *SSRCManager         // Intelligent SSRC mapping manager
-	mu             sync.Mutex
+	followUserID       string                 // User ID to follow
+	autoFollow         bool                   // Whether to auto-follow user
+	simpleSSRCManager  *SimpleSSRCManager     // Simple deterministic SSRC mapping
+	mu                 sync.Mutex
 }
 
 // New creates a new VoiceBot instance
@@ -38,10 +38,10 @@ func New(token string, sessionManager *session.Manager, audioProcessor audio.Voi
 	}
 
 	bot := &VoiceBot{
-		discord:        discord,
-		sessions:       sessionManager,
-		audioProcessor: audioProcessor,
-		ssrcManager:    NewSSRCManager(discord),
+		discord:           discord,
+		sessions:          sessionManager,
+		audioProcessor:    audioProcessor,
+		simpleSSRCManager: NewSimpleSSRCManager(),
 	}
 
 	// Register handlers
@@ -97,7 +97,6 @@ func (vb *VoiceBot) JoinChannel(guildID, channelID string) error {
 	}).Debug("Voice connection established")
 
 	vb.voiceConn = vc
-	
 	// Register voice speaking handler on the voice connection
 	vc.AddHandler(vb.voiceSpeakingUpdate)
 	logrus.WithField("handler_count", len(vc.OpusRecv)).Debug("Registered VoiceSpeakingUpdate handler on voice connection")
@@ -119,9 +118,8 @@ func (vb *VoiceBot) JoinChannel(guildID, channelID string) error {
 		logrus.Debug("Triggered speaking state change to activate voice events")
 	}()
 
-	// Set channel context and populate expected users
-	vb.ssrcManager.SetChannel(guildID, channelID)
-	go vb.ssrcManager.PopulateExpectedUsers(guildID, channelID)
+	// Set channel context for simple SSRC manager
+	vb.simpleSSRCManager.SetChannel(guildID, channelID)
 
 	// Start a new session
 	sessionID := vb.sessions.CreateSession(guildID, channelID)
@@ -156,8 +154,8 @@ func (vb *VoiceBot) LeaveChannel() {
 		logrus.Info("Left voice channel")
 	}
 
-	// Clear SSRC manager state when leaving channel
-	vb.ssrcManager.Clear()
+	// Clear simple SSRC manager state when leaving channel
+	vb.simpleSSRCManager.Clear()
 }
 
 // FindUserVoiceChannel finds which voice channel a user is in
@@ -285,12 +283,12 @@ func (vb *VoiceBot) voiceStateUpdate(s *discordgo.Session, vsu *discordgo.VoiceS
 }
 
 func (vb *VoiceBot) voiceSpeakingUpdate(vc *discordgo.VoiceConnection, vsu *discordgo.VoiceSpeakingUpdate) {
-	// Log that we received the event
+	// CRITICAL: This is the ONLY deterministic way to map SSRCs to users
 	logrus.WithFields(logrus.Fields{
 		"user_id":  vsu.UserID,
 		"ssrc":     vsu.SSRC,
 		"speaking": vsu.Speaking,
-	}).Info("VoiceSpeakingUpdate event received")
+	}).Info("🎤 VoiceSpeakingUpdate event received - This is the ONLY reliable SSRC mapping source")
 	
 	// Check for overflow before conversion
 	if vsu.SSRC < 0 || vsu.SSRC > int(^uint32(0)) {
@@ -344,8 +342,8 @@ func (vb *VoiceBot) voiceSpeakingUpdate(vc *discordgo.VoiceConnection, vsu *disc
 		nickname = username
 	}
 
-	// Register the mapping with the SSRC manager
-	vb.ssrcManager.MapSSRC(ssrc, vsu.UserID, username, nickname)
+	// Register the mapping with the SIMPLE SSRC manager (deterministic approach)
+	vb.simpleSSRCManager.MapSSRC(ssrc, vsu.UserID, username, nickname)
 
 	action := "stopped"
 	if vsu.Speaking {
@@ -353,18 +351,17 @@ func (vb *VoiceBot) voiceSpeakingUpdate(vc *discordgo.VoiceConnection, vsu *disc
 	}
 
 	// Get current statistics
-	stats := vb.ssrcManager.GetStatistics()
+	stats := vb.simpleSSRCManager.GetStatistics()
 	
 	logrus.WithFields(logrus.Fields{
-		"ssrc":               ssrc,
-		"user_id":            vsu.UserID,
-		"username":           username,
-		"nickname":           nickname,
-		"action":             action,
-		"confirmed_mappings": stats["confirmed_mappings"],
-		"remaining_unmapped": stats["unmapped_ssrcs"],
-		"expected_users":     stats["expected_users"],
-	}).Info(fmt.Sprintf("User %s speaking - SSRC mapped via speaking event", action))
+		"ssrc":           ssrc,
+		"user_id":        vsu.UserID,
+		"username":       username,
+		"nickname":       nickname,
+		"action":         action,
+		"exact_mappings": stats["exact_mappings"],
+		"method":         "deterministic",
+	}).Info(fmt.Sprintf("✅ User %s speaking - SSRC mapped via VoiceSpeakingUpdate (DETERMINISTIC)", action))
 }
 
 // populateUsersInChannel is deprecated - replaced by SSRCManager.PopulateExpectedUsers
@@ -378,13 +375,15 @@ var unknownSSRCLogCache = struct {
 }
 
 // GetUserBySSRC returns user information for a given SSRC (implements UserResolver)
+// DETERMINISTIC APPROACH: Only returns exact mappings from VoiceSpeakingUpdate events
 func (vb *VoiceBot) GetUserBySSRC(ssrc uint32) (userID, username, nickname string) {
-	// Use the intelligent SSRC manager
-	return vb.ssrcManager.GetUserBySSRC(ssrc)
+	// Use the simple deterministic SSRC manager
+	return vb.simpleSSRCManager.GetUserBySSRC(ssrc)
 }
 
-// RegisterAudioPacket notifies the SSRC manager about incoming audio
-// This helps with tracking and deduction
+// RegisterAudioPacket is called by the audio processor for each packet
+// DETERMINISTIC APPROACH: We don't analyze packets to guess mappings
 func (vb *VoiceBot) RegisterAudioPacket(ssrc uint32, packetSize int) {
-	vb.ssrcManager.RegisterAudioPacket(ssrc, packetSize)
+	// No-op in deterministic approach - we only map via VoiceSpeakingUpdate events
+	vb.simpleSSRCManager.RegisterAudioPacket(ssrc, packetSize)
 }
