@@ -15,6 +15,27 @@ import (
 	"layeh.com/gopus"
 )
 
+const (
+	// Audio configuration constants
+	defaultSampleRate = 48000
+	defaultChannels   = 2
+	
+	// Worker and queue configuration
+	defaultWorkerCount     = 2
+	defaultQueueSize       = 100
+	defaultEventBufferSize = 1000
+	perSpeakerQueueRatio   = 4 // Divisor for per-speaker queue size
+	
+	// Event publishing intervals
+	bufferingEventPacketInterval = 50 // Publish buffering status every N packets
+	
+	// Packet size thresholds
+	comfortNoisePacketMaxSize = 3 // Packets <= 3 bytes are comfort noise
+	
+	// Audio data calculations
+	bytesPerSample = 2 // 16-bit audio = 2 bytes per sample
+)
+
 // UserResolver interface for resolving SSRC to user information
 type UserResolver interface {
 	GetUserBySSRC(ssrc uint32) (userID, username, nickname string)
@@ -58,11 +79,11 @@ type ProcessorConfig struct {
 // DefaultProcessorConfig returns default configuration
 func DefaultProcessorConfig() ProcessorConfig {
 	return ProcessorConfig{
-		SampleRate:      48000,
-		Channels:        2,
-		WorkerCount:     2,
-		QueueSize:       100,
-		EventBufferSize: 1000,
+		SampleRate:      defaultSampleRate,
+		Channels:        defaultChannels,
+		WorkerCount:     defaultWorkerCount,
+		QueueSize:       defaultQueueSize,
+		EventBufferSize: defaultEventBufferSize,
 		BufferConfig:    DefaultBufferConfig(),
 	}
 }
@@ -101,7 +122,7 @@ func NewAsyncProcessor(trans transcriber.Transcriber, config ProcessorConfig) *A
 	// Create speaker-aware dispatcher for optimal multi-speaker Discord processing
 	dispatcherConfig := pipeline.DefaultSpeakerDispatcherConfig()
 	dispatcherConfig.WorkerCount = config.WorkerCount
-	dispatcherConfig.MaxQueueSize = config.QueueSize / 4 // Per-speaker queue size
+	dispatcherConfig.MaxQueueSize = config.QueueSize / perSpeakerQueueRatio // Per-speaker queue size
 	p.dispatcher = pipeline.NewSpeakerAwareDispatcher(trans, dispatcherConfig)
 
 	// Start segment router
@@ -150,7 +171,7 @@ func (p *AsyncProcessor) ProcessVoiceReceive(vc *discordgo.VoiceConnection, sess
 		buffer := p.getOrCreateBuffer(packet.SSRC, userID, username, nickname, activeSessionID, sessionManager)
 
 		// Check if this is a comfort noise packet
-		isSilence := len(packet.Opus) <= 3
+		isSilence := len(packet.Opus) <= comfortNoisePacketMaxSize
 
 		if isSilence {
 			// Process as silence
@@ -166,7 +187,7 @@ func (p *AsyncProcessor) ProcessVoiceReceive(vc *discordgo.VoiceConnection, sess
 		}
 
 		// Convert PCM to bytes
-		pcmBytes := make([]byte, len(pcm)*2)
+		pcmBytes := make([]byte, len(pcm)*bytesPerSample)
 		for i := 0; i < len(pcm); i++ {
 			// #nosec G115 -- int16 to uint16 conversion is safe for audio samples
 			binary.LittleEndian.PutUint16(pcmBytes[i*2:], uint16(pcm[i]))
@@ -177,13 +198,13 @@ func (p *AsyncProcessor) ProcessVoiceReceive(vc *discordgo.VoiceConnection, sess
 		buffer.ProcessAudio(pcmBytes, true)
 
 		// Publish buffering event periodically
-		if packetCount%50 == 0 {
+		if packetCount%bufferingEventPacketInterval == 0 {
 			status := buffer.GetStatus()
 			p.eventBus.PublishAudioBuffering(activeSessionID, feedback.AudioBufferingData{
 				UserID:         status.UserID,
 				Username:       status.Username,
 				BufferDuration: status.BufferDuration,
-				BufferSize:     int(status.BufferDuration.Seconds() * float64(p.config.SampleRate*p.config.Channels*2)),
+				BufferSize:     int(status.BufferDuration.Seconds() * float64(p.config.SampleRate*p.config.Channels*bytesPerSample)),
 				IsSpeaking:     status.BufferDuration > 0,
 			})
 		}

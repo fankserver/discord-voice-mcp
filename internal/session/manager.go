@@ -145,14 +145,8 @@ func (m *Manager) AddTranscript(sessionID, userID, username, text string) error 
 	session, exists := m.sessions[sessionID]
 	if !exists {
 		logrus.WithFields(logrus.Fields{
-			"session_id": sessionID,
-			"available_sessions": func() []string {
-				var keys []string
-				for k := range m.sessions {
-					keys = append(keys, k)
-				}
-				return keys
-			}(),
+			"session_id":             sessionID,
+			"available_session_count": len(m.sessions),
 		}).Error("Session not found for transcript")
 		return fmt.Errorf("session %s not found", sessionID)
 	}
