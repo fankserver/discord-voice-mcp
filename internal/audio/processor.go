@@ -106,7 +106,7 @@ func init() {
 		"overlap_ms":             overlapMs,
 		"context_expiration_sec": contextExpirationSec,
 	}).Info("Audio processor configuration loaded")
-	
+
 	// Log IntelligentVAD settings for debugging natural speech detection
 	vadConfig := NewIntelligentVADConfig()
 	logrus.WithFields(logrus.Fields{

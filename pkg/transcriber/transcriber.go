@@ -109,24 +109,24 @@ func (wt *WhisperTranscriber) Transcribe(audio []byte) (string, error) {
 // TranscribeWithContext implements the new Transcriber interface with enhanced options
 func (wt *WhisperTranscriber) TranscribeWithContext(audio []byte, opts TranscriptionOptions) (*TranscriptResult, error) {
 	startTime := time.Now()
-	
+
 	// Convert old TranscribeOptions if needed for backward compatibility
 	var previousTranscript string
 	var overlapAudio []byte
-	
+
 	// Use new options
 	previousTranscript = opts.PreviousContext
 	overlapAudio = opts.OverlapAudio
 	if opts.Language != "" && opts.Language != "auto" {
 		wt.language = opts.Language
 	}
-	
+
 	// Call the legacy implementation
 	text, err := wt.transcribeInternal(audio, previousTranscript, overlapAudio)
 	if err != nil {
 		return nil, err
 	}
-	
+
 	// Build result
 	return &TranscriptResult{
 		Text:       text,
@@ -307,7 +307,7 @@ func (mt *MockTranscriber) TranscribeWithContext(audio []byte, opts Transcriptio
 	if opts.PreviousContext != "" {
 		text = fmt.Sprintf("[Mock transcript with context: %d bytes]", len(audio))
 	}
-	
+
 	return &TranscriptResult{
 		Text:       text,
 		Confidence: 1.0,

@@ -145,7 +145,7 @@ func (m *Manager) AddTranscript(sessionID, userID, username, text string) error 
 	session, exists := m.sessions[sessionID]
 	if !exists {
 		logrus.WithFields(logrus.Fields{
-			"session_id":        sessionID,
+			"session_id": sessionID,
 			"available_sessions": func() []string {
 				var keys []string
 				for k := range m.sessions {
@@ -165,12 +165,12 @@ func (m *Manager) AddTranscript(sessionID, userID, username, text string) error 
 	}
 
 	session.Transcripts = append(session.Transcripts, transcript)
-	
+
 	logrus.WithFields(logrus.Fields{
-		"session_id":     sessionID,
-		"user_id":        userID,
-		"username":       username,
-		"text":           text,
+		"session_id":        sessionID,
+		"user_id":           userID,
+		"username":          username,
+		"text":              text,
 		"total_transcripts": len(session.Transcripts),
 	}).Info("Transcript added to session successfully")
 

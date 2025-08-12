@@ -23,7 +23,7 @@ type AudioSegment struct {
 	Priority    int
 	Reason      string
 	SubmittedAt time.Time
-	
+
 	// Callbacks for progress tracking
 	OnStart    func()
 	OnProgress func(partial string)
@@ -37,29 +37,29 @@ type TranscriptionQueue struct {
 	urgentQueue chan *AudioSegment
 	highQueue   chan *AudioSegment
 	normalQueue chan *AudioSegment
-	
+
 	// Worker management
-	workers    []*Worker
-	workerWg   sync.WaitGroup
-	
+	workers  []*Worker
+	workerWg sync.WaitGroup
+
 	// Metrics
-	metrics    *QueueMetrics
-	
+	metrics *QueueMetrics
+
 	// Control
-	ctx        context.Context
-	cancel     context.CancelFunc
-	
+	ctx    context.Context
+	cancel context.CancelFunc
+
 	// Configuration
-	config     QueueConfig
+	config QueueConfig
 }
 
 // QueueConfig holds queue configuration
 type QueueConfig struct {
-	WorkerCount      int
-	QueueSize        int
-	MaxRetries       int
-	RetryDelay       time.Duration
-	ProcessTimeout   time.Duration
+	WorkerCount    int
+	QueueSize      int
+	MaxRetries     int
+	RetryDelay     time.Duration
+	ProcessTimeout time.Duration
 }
 
 // DefaultQueueConfig returns default configuration
@@ -87,7 +87,7 @@ type QueueMetrics struct {
 // NewTranscriptionQueue creates a new transcription queue
 func NewTranscriptionQueue(config QueueConfig) *TranscriptionQueue {
 	ctx, cancel := context.WithCancel(context.Background())
-	
+
 	return &TranscriptionQueue{
 		urgentQueue: make(chan *AudioSegment, config.QueueSize/4),
 		highQueue:   make(chan *AudioSegment, config.QueueSize/4),
@@ -106,32 +106,32 @@ func (q *TranscriptionQueue) Start(trans transcriber.Transcriber) {
 	for i := 0; i < q.config.WorkerCount; i++ {
 		worker := NewWorker(i, q, trans, q.config)
 		q.workers = append(q.workers, worker)
-		
+
 		q.workerWg.Add(1)
 		go func(w *Worker) {
 			defer q.workerWg.Done()
 			w.Run(q.ctx)
 		}(worker)
 	}
-	
+
 	logrus.WithField("workers", q.config.WorkerCount).Info("Transcription queue started")
 }
 
 // Stop gracefully shuts down the queue
 func (q *TranscriptionQueue) Stop() {
 	logrus.Info("Stopping transcription queue...")
-	
+
 	// Cancel context to stop workers
 	q.cancel()
-	
+
 	// Wait for workers to finish
 	q.workerWg.Wait()
-	
+
 	// Close channels
 	close(q.urgentQueue)
 	close(q.highQueue)
 	close(q.normalQueue)
-	
+
 	logrus.Info("Transcription queue stopped")
 }
 
@@ -141,11 +141,11 @@ func (q *TranscriptionQueue) Submit(segment *AudioSegment) error {
 	if segment.ID == "" {
 		segment.ID = uuid.New().String()
 	}
-	
+
 	// Update metrics
 	atomic.AddInt64(&q.metrics.SegmentsQueued, 1)
 	atomic.AddInt32(&q.metrics.CurrentQueueDepth, 1)
-	
+
 	// Route to appropriate queue based on priority
 	var targetQueue chan *AudioSegment
 	switch segment.Priority {
@@ -156,7 +156,7 @@ func (q *TranscriptionQueue) Submit(segment *AudioSegment) error {
 	default: // Normal
 		targetQueue = q.normalQueue
 	}
-	
+
 	// Non-blocking send with timeout
 	select {
 	case targetQueue <- segment:
@@ -167,22 +167,22 @@ func (q *TranscriptionQueue) Submit(segment *AudioSegment) error {
 			"priority":   segment.Priority,
 		}).Debug("Segment queued for transcription")
 		return nil
-		
+
 	case <-time.After(100 * time.Millisecond):
 		// Queue is full
 		atomic.AddInt32(&q.metrics.CurrentQueueDepth, -1)
 		atomic.AddInt64(&q.metrics.SegmentsFailed, 1)
-		
+
 		logrus.WithFields(logrus.Fields{
 			"segment_id": segment.ID,
 			"user":       segment.Username,
 		}).Warn("Queue full, segment rejected")
-		
+
 		if segment.OnError != nil {
 			segment.OnError(ErrQueueFull)
 		}
 		return ErrQueueFull
-		
+
 	case <-q.ctx.Done():
 		return ErrQueueStopped
 	}
@@ -198,12 +198,12 @@ func (q *TranscriptionQueue) GetMetrics() QueueMetrics {
 		CurrentQueueDepth: atomic.LoadInt32(&q.metrics.CurrentQueueDepth),
 		ActiveWorkers:     atomic.LoadInt32(&q.metrics.ActiveWorkers),
 	}
-	
+
 	// Calculate average process time
 	if metrics.SegmentsProcessed > 0 {
 		metrics.AverageProcessTime = metrics.TotalProcessTime / metrics.SegmentsProcessed
 	}
-	
+
 	return metrics
 }
 
@@ -215,7 +215,7 @@ func (q *TranscriptionQueue) GetQueueDepth() int {
 // updateMetricsAfterProcess updates metrics after processing a segment
 func (q *TranscriptionQueue) updateMetricsAfterProcess(processTime time.Duration, success bool) {
 	atomic.AddInt32(&q.metrics.CurrentQueueDepth, -1)
-	
+
 	if success {
 		atomic.AddInt64(&q.metrics.SegmentsProcessed, 1)
 		atomic.AddInt64(&q.metrics.TotalProcessTime, int64(processTime.Milliseconds()))

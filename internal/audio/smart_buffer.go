@@ -46,11 +46,11 @@ func (b *AudioBuffer) Append(pcm []byte, isSpeech bool) {
 		b.firstWriteTime = time.Now()
 	}
 	b.lastWriteTime = time.Now()
-	
+
 	if isSpeech {
 		b.lastSpeechTime = time.Now()
 	}
-	
+
 	b.data.Write(pcm)
 	b.totalSamples += len(pcm) / (b.channels * b.bytesPerSample)
 }
@@ -103,43 +103,43 @@ type SmartUserBuffer struct {
 	username  string
 	ssrc      uint32
 	sessionID string // Added for event correlation
-	
+
 	// Dual buffer system
 	activeBuffer     *AudioBuffer
 	processingBuffer *AudioBuffer
-	
+
 	// VAD for intelligent segmentation
 	vad *IntelligentVAD
-	
+
 	// State tracking
 	lastTranscript     string
 	lastTranscriptTime time.Time
 	isProcessing       bool
-	
+
 	// Configuration
 	config BufferConfig
-	
+
 	// Metrics
 	metrics *BufferMetrics
-	
+
 	// Thread safety
 	mu sync.Mutex
-	
+
 	// Output channel for segments
 	outputChan chan<- *AudioSegment
-	
+
 	// Callback for transcription completion
 	onTranscriptionComplete func(sessionID, userID, username, text string) error
 }
 
 // BufferConfig holds configuration for smart buffer
 type BufferConfig struct {
-	SampleRate         int
-	Channels           int
-	TargetDuration     time.Duration // Ideal buffer size (3 seconds)
-	MaxDuration        time.Duration // Force transcribe at this size (10 seconds)
-	MinSpeechDuration  time.Duration // Minimum speech before transcribing (500ms)
-	ContextExpiration  time.Duration // How long to keep context (30 seconds)
+	SampleRate        int
+	Channels          int
+	TargetDuration    time.Duration // Ideal buffer size (3 seconds)
+	MaxDuration       time.Duration // Force transcribe at this size (10 seconds)
+	MinSpeechDuration time.Duration // Minimum speech before transcribing (500ms)
+	ContextExpiration time.Duration // How long to keep context (30 seconds)
 }
 
 // DefaultBufferConfig returns default configuration optimized for multi-speaker Discord conversations
@@ -150,9 +150,9 @@ func DefaultBufferConfig() BufferConfig {
 		SampleRate:        48000,
 		Channels:          2,
 		TargetDuration:    1500 * time.Millisecond, // 1.5s for rapid exchanges
-		MaxDuration:       3 * time.Second,          // 3s max to prevent long waits
+		MaxDuration:       3 * time.Second,         // 3s max to prevent long waits
 		MinSpeechDuration: 300 * time.Millisecond,  // 300ms min for quick responses
-		ContextExpiration: 15 * time.Second,         // Shorter context for active discussions
+		ContextExpiration: 15 * time.Second,        // Shorter context for active discussions
 	}
 }
 
@@ -196,16 +196,16 @@ func (b *SmartUserBuffer) SetSessionID(sessionID string) {
 func (b *SmartUserBuffer) ProcessAudio(pcm []byte, isSpeech bool) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	
+
 	// Always append to active buffer
 	b.activeBuffer.Append(pcm, isSpeech)
 	b.metrics.BytesProcessed += int64(len(pcm))
-	
+
 	// Multi-speaker Discord optimization: ultra-responsive processing
 	if !b.isProcessing {
 		// Standard VAD decision
 		decision := b.vad.ShouldTranscribe(b.activeBuffer)
-		
+
 		// Or rapid conversational response (within 5s of last transcript)
 		if !decision.Should && time.Since(b.lastTranscriptTime) < 5*time.Second {
 			if b.activeBuffer.Duration() > 500*time.Millisecond && b.activeBuffer.SilenceDuration() > 300*time.Millisecond {
@@ -216,7 +216,7 @@ func (b *SmartUserBuffer) ProcessAudio(pcm []byte, isSpeech bool) {
 				}
 			}
 		}
-		
+
 		// Or ultra-short processing for very active conversations
 		if !decision.Should && b.activeBuffer.Duration() > 800*time.Millisecond {
 			if b.activeBuffer.SilenceDuration() > 200*time.Millisecond {
@@ -227,7 +227,7 @@ func (b *SmartUserBuffer) ProcessAudio(pcm []byte, isSpeech bool) {
 				}
 			}
 		}
-		
+
 		if decision.Should {
 			b.triggerTranscription(decision)
 		}
@@ -245,12 +245,12 @@ func (b *SmartUserBuffer) triggerTranscription(decision TranscribeDecision) {
 		}).Debug("Buffer too small, skipping transcription")
 		return
 	}
-	
+
 	// Swap buffers - instant, non-blocking
 	b.processingBuffer = b.activeBuffer
 	b.activeBuffer = NewAudioBuffer(b.config.SampleRate, b.config.Channels)
 	b.isProcessing = true
-	
+
 	// Get context if not expired
 	var context string
 	if time.Since(b.lastTranscriptTime) < b.config.ContextExpiration && b.lastTranscript != "" {
@@ -261,7 +261,7 @@ func (b *SmartUserBuffer) triggerTranscription(decision TranscribeDecision) {
 			"context_chars": len(context),
 		}).Debug("Using previous transcript as context")
 	}
-	
+
 	// Create segment for processing
 	segment := &AudioSegment{
 		ID:          uuid.New().String(),
@@ -282,14 +282,14 @@ func (b *SmartUserBuffer) triggerTranscription(decision TranscribeDecision) {
 			b.isProcessing = false
 			sessionID := b.sessionID
 			b.mu.Unlock()
-			
+
 			logrus.WithFields(logrus.Fields{
 				"user":       b.username,
 				"length":     len(text),
 				"session_id": sessionID,
 				"text":       text,
 			}).Debug("Transcription completed in buffer")
-			
+
 			// Call session manager callback if available
 			if b.onTranscriptionComplete != nil && text != "" {
 				err := b.onTranscriptionComplete(sessionID, b.userID, b.username, text)
@@ -308,10 +308,10 @@ func (b *SmartUserBuffer) triggerTranscription(decision TranscribeDecision) {
 				}
 			} else {
 				logrus.WithFields(logrus.Fields{
-					"user":                b.username,
-					"has_callback":        b.onTranscriptionComplete != nil,
-					"text_empty":          text == "",
-					"session_id":          sessionID,
+					"user":         b.username,
+					"has_callback": b.onTranscriptionComplete != nil,
+					"text_empty":   text == "",
+					"session_id":   sessionID,
 				}).Warn("Transcript not added to session - missing callback or empty text")
 			}
 		},
@@ -319,15 +319,15 @@ func (b *SmartUserBuffer) triggerTranscription(decision TranscribeDecision) {
 			b.mu.Lock()
 			b.isProcessing = false
 			b.mu.Unlock()
-			
+
 			logrus.WithError(err).WithField("user", b.username).Error("Transcription failed")
 		},
 	}
-	
+
 	// Update metrics
 	b.metrics.SegmentsCreated++
 	b.metrics.TotalAudioTime += segment.Duration
-	
+
 	// Non-blocking send to output channel
 	select {
 	case b.outputChan <- segment:
@@ -352,7 +352,7 @@ func (b *SmartUserBuffer) triggerTranscription(decision TranscribeDecision) {
 func (b *SmartUserBuffer) GetMetrics() BufferMetrics {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	
+
 	metrics := *b.metrics
 	if b.metrics.SegmentsCreated > 0 {
 		metrics.AverageBufferSize = b.metrics.TotalAudioTime / time.Duration(b.metrics.SegmentsCreated)
@@ -364,7 +364,7 @@ func (b *SmartUserBuffer) GetMetrics() BufferMetrics {
 func (b *SmartUserBuffer) GetStatus() BufferStatus {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	
+
 	return BufferStatus{
 		UserID:          b.userID,
 		Username:        b.username,
@@ -389,13 +389,11 @@ type BufferStatus struct {
 	DroppedSegments int
 }
 
-
-
 // Reset clears the buffer state
 func (b *SmartUserBuffer) Reset() {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	
+
 	b.activeBuffer.Reset()
 	if b.processingBuffer != nil {
 		b.processingBuffer.Reset()

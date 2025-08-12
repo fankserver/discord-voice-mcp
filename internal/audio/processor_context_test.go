@@ -27,10 +27,10 @@ func (m *MockContextAwareTranscriber) TranscribeWithContext(audio []byte, opts t
 		return nil, args.Error(1)
 	}
 	return &transcriber.TranscriptResult{
-		Text: args.String(0),
+		Text:       args.String(0),
 		Confidence: 0.95,
-		Language: "en",
-		Duration: 10 * time.Millisecond,
+		Language:   "en",
+		Duration:   10 * time.Millisecond,
 	}, args.Error(1)
 }
 

@@ -16,18 +16,18 @@ const (
 	EventTranscriptionProgress  EventType = "transcription.progress"
 	EventTranscriptionCompleted EventType = "transcription.completed"
 	EventTranscriptionFailed    EventType = "transcription.failed"
-	
+
 	// Audio events
-	EventAudioBuffering  EventType = "audio.buffering"
-	EventAudioSegmented  EventType = "audio.segmented"
-	EventSpeakerStarted  EventType = "audio.speaker.started"
-	EventSpeakerStopped  EventType = "audio.speaker.stopped"
-	
+	EventAudioBuffering EventType = "audio.buffering"
+	EventAudioSegmented EventType = "audio.segmented"
+	EventSpeakerStarted EventType = "audio.speaker.started"
+	EventSpeakerStopped EventType = "audio.speaker.stopped"
+
 	// System events
-	EventQueueDepthChanged EventType = "queue.depth.changed"
+	EventQueueDepthChanged   EventType = "queue.depth.changed"
 	EventWorkerStatusChanged EventType = "worker.status.changed"
-	EventSessionCreated EventType = "session.created"
-	EventSessionEnded EventType = "session.ended"
+	EventSessionCreated      EventType = "session.created"
+	EventSessionEnded        EventType = "session.ended"
 )
 
 // Event represents a system event
@@ -50,20 +50,20 @@ type TranscriptionStartedData struct {
 
 // TranscriptionProgressData contains data for transcription progress events
 type TranscriptionProgressData struct {
-	SegmentID    string
-	UserID       string
-	PartialText  string
-	ProcessTime  time.Duration
+	SegmentID   string
+	UserID      string
+	PartialText string
+	ProcessTime time.Duration
 }
 
 // TranscriptionCompletedData contains data for transcription completed events
 type TranscriptionCompletedData struct {
-	SegmentID    string
-	UserID       string
-	Username     string
-	Text         string
-	Confidence   float32
-	ProcessTime  time.Duration
+	SegmentID     string
+	UserID        string
+	Username      string
+	Text          string
+	Confidence    float32
+	ProcessTime   time.Duration
 	AudioDuration time.Duration
 }
 
@@ -90,13 +90,13 @@ type EventHandler func(event Event)
 
 // EventBus manages event distribution
 type EventBus struct {
-	mu           sync.RWMutex
-	handlers     map[EventType][]EventHandler
-	allHandlers  []EventHandler
-	buffer       chan Event
-	stopCh       chan struct{}
-	wg           sync.WaitGroup
-	metrics      *eventMetricsInternal
+	mu          sync.RWMutex
+	handlers    map[EventType][]EventHandler
+	allHandlers []EventHandler
+	buffer      chan Event
+	stopCh      chan struct{}
+	wg          sync.WaitGroup
+	metrics     *eventMetricsInternal
 }
 
 // EventMetrics tracks event statistics (public API)
@@ -124,11 +124,11 @@ func NewEventBus(bufferSize int) *EventBus {
 			EventsPublished: make(map[EventType]int64),
 		},
 	}
-	
+
 	// Start event processor
 	eb.wg.Add(1)
 	go eb.processEvents()
-	
+
 	return eb
 }
 
@@ -136,9 +136,9 @@ func NewEventBus(bufferSize int) *EventBus {
 func (eb *EventBus) Subscribe(eventType EventType, handler EventHandler) func() {
 	eb.mu.Lock()
 	defer eb.mu.Unlock()
-	
+
 	eb.handlers[eventType] = append(eb.handlers[eventType], handler)
-	
+
 	// Return unsubscribe function
 	return func() {
 		eb.Unsubscribe(eventType, handler)
@@ -149,9 +149,9 @@ func (eb *EventBus) Subscribe(eventType EventType, handler EventHandler) func() 
 func (eb *EventBus) SubscribeAll(handler EventHandler) func() {
 	eb.mu.Lock()
 	defer eb.mu.Unlock()
-	
+
 	eb.allHandlers = append(eb.allHandlers, handler)
-	
+
 	// Return unsubscribe function
 	return func() {
 		eb.UnsubscribeAll(handler)
@@ -162,7 +162,7 @@ func (eb *EventBus) SubscribeAll(handler EventHandler) func() {
 func (eb *EventBus) Unsubscribe(eventType EventType, handler EventHandler) {
 	eb.mu.Lock()
 	defer eb.mu.Unlock()
-	
+
 	handlers := eb.handlers[eventType]
 	for i, h := range handlers {
 		// Compare function pointers
@@ -177,7 +177,7 @@ func (eb *EventBus) Unsubscribe(eventType EventType, handler EventHandler) {
 func (eb *EventBus) UnsubscribeAll(handler EventHandler) {
 	eb.mu.Lock()
 	defer eb.mu.Unlock()
-	
+
 	for i, h := range eb.allHandlers {
 		if &h == &handler {
 			eb.allHandlers = append(eb.allHandlers[:i], eb.allHandlers[i+1:]...)
@@ -192,12 +192,12 @@ func (eb *EventBus) Publish(event Event) {
 	if event.Timestamp.IsZero() {
 		event.Timestamp = time.Now()
 	}
-	
+
 	// Update metrics
 	eb.metrics.mu.Lock()
 	eb.metrics.EventsPublished[event.Type]++
 	eb.metrics.mu.Unlock()
-	
+
 	// Non-blocking send
 	select {
 	case eb.buffer <- event:
@@ -207,7 +207,7 @@ func (eb *EventBus) Publish(event Event) {
 		eb.metrics.mu.Lock()
 		eb.metrics.EventsDropped++
 		eb.metrics.mu.Unlock()
-		
+
 		logrus.WithFields(logrus.Fields{
 			"event_type": event.Type,
 			"session_id": event.SessionID,
@@ -223,12 +223,12 @@ func (eb *EventBus) PublishAsync(event Event) {
 // processEvents handles event distribution to subscribers
 func (eb *EventBus) processEvents() {
 	defer eb.wg.Done()
-	
+
 	for {
 		select {
 		case event := <-eb.buffer:
 			eb.deliverEvent(event)
-			
+
 		case <-eb.stopCh:
 			// Process remaining events
 			for len(eb.buffer) > 0 {
@@ -248,7 +248,7 @@ func (eb *EventBus) processEvents() {
 func (eb *EventBus) deliverEvent(event Event) {
 	eb.mu.RLock()
 	defer eb.mu.RUnlock()
-	
+
 	// Deliver to specific handlers
 	if handlers, ok := eb.handlers[event.Type]; ok {
 		for _, handler := range handlers {
@@ -262,16 +262,16 @@ func (eb *EventBus) deliverEvent(event Event) {
 						}).Error("Event handler panic")
 					}
 				}()
-				
+
 				h(event)
-				
+
 				eb.metrics.mu.Lock()
 				eb.metrics.EventsDelivered++
 				eb.metrics.mu.Unlock()
 			}(handler)
 		}
 	}
-	
+
 	// Deliver to all-event handlers
 	for _, handler := range eb.allHandlers {
 		go func(h EventHandler) {
@@ -283,9 +283,9 @@ func (eb *EventBus) deliverEvent(event Event) {
 					}).Error("Event handler panic")
 				}
 			}()
-			
+
 			h(event)
-			
+
 			eb.metrics.mu.Lock()
 			eb.metrics.EventsDelivered++
 			eb.metrics.mu.Unlock()
@@ -304,18 +304,18 @@ func (eb *EventBus) Stop() {
 func (eb *EventBus) GetMetrics() EventMetrics {
 	eb.metrics.mu.Lock()
 	defer eb.metrics.mu.Unlock()
-	
+
 	// Create a copy
 	metrics := EventMetrics{
 		EventsPublished: make(map[EventType]int64),
 		EventsDelivered: eb.metrics.EventsDelivered,
 		EventsDropped:   eb.metrics.EventsDropped,
 	}
-	
+
 	for k, v := range eb.metrics.EventsPublished {
 		metrics.EventsPublished[k] = v
 	}
-	
+
 	return metrics
 }
 

@@ -279,7 +279,7 @@ func (wt *GPUWhisperTranscriber) TranscribeWithContext(audio []byte, opts Transc
 	// Clean up the output
 	transcript := string(bytes.TrimSpace(outBuf.Bytes()))
 	duration := time.Since(startTime)
-	
+
 	if transcript == "" {
 		logrus.WithFields(logrus.Fields{
 			"audio_duration_ms": len(audio) * 1000 / 192000,
