@@ -2,12 +2,15 @@ package audio
 
 import (
 	"bytes"
+	"fmt"
 	"sync"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/sirupsen/logrus"
 )
+
+// UserResolver interface is defined in async_processor.go
 
 // BufferState represents the state of a buffer
 type BufferState int
@@ -99,10 +102,10 @@ func (b *AudioBuffer) Reset() {
 // SmartUserBuffer implements dual-buffer system for non-blocking audio processing
 type SmartUserBuffer struct {
 	// User identification
-	userID    string
-	username  string
-	ssrc      uint32
-	sessionID string // Added for event correlation
+	userID       string
+	ssrc         uint32
+	userResolver UserResolver // Dynamic username resolution
+	sessionID    string       // Added for event correlation
 
 	// Dual buffer system
 	activeBuffer     *AudioBuffer
@@ -174,8 +177,8 @@ func NewSmartUserBuffer(userID, username string, ssrc uint32, outputChan chan<- 
 func NewSmartUserBufferWithCallback(userID, username string, ssrc uint32, outputChan chan<- *AudioSegment, config BufferConfig, onTranscriptionComplete func(sessionID, userID, username, text string) error) *SmartUserBuffer {
 	return &SmartUserBuffer{
 		userID:                  userID,
-		username:                username,
 		ssrc:                    ssrc,
+		userResolver:            nil, // Will be set via SetUserResolver
 		activeBuffer:            NewAudioBuffer(config.SampleRate, config.Channels),
 		vad:                     NewIntelligentVAD(NewIntelligentVADConfig()),
 		config:                  config,
@@ -190,6 +193,23 @@ func (b *SmartUserBuffer) SetSessionID(sessionID string) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	b.sessionID = sessionID
+}
+
+// SetUserResolver sets the user resolver for dynamic username resolution
+func (b *SmartUserBuffer) SetUserResolver(resolver UserResolver) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.userResolver = resolver
+}
+
+// getCurrentUsername gets the current username for this SSRC
+func (b *SmartUserBuffer) getCurrentUsername() string {
+	if b.userResolver != nil {
+		_, _, nickname := b.userResolver.GetUserBySSRC(b.ssrc)
+		return nickname
+	}
+	// Fallback to SSRC-based name
+	return fmt.Sprintf("Unknown-%d", b.ssrc)
 }
 
 // ProcessAudio handles incoming audio with ultra-responsive multi-speaker processing
@@ -239,7 +259,7 @@ func (b *SmartUserBuffer) triggerTranscription(decision TranscribeDecision) {
 	// Don't transcribe tiny buffers
 	if b.activeBuffer.Duration() < b.config.MinSpeechDuration {
 		logrus.WithFields(logrus.Fields{
-			"user":     b.username,
+			"user":     b.getCurrentUsername(),
 			"duration": b.activeBuffer.Duration(),
 			"min":      b.config.MinSpeechDuration,
 		}).Debug("Buffer too small, skipping transcription")
@@ -256,7 +276,7 @@ func (b *SmartUserBuffer) triggerTranscription(decision TranscribeDecision) {
 	if time.Since(b.lastTranscriptTime) < b.config.ContextExpiration && b.lastTranscript != "" {
 		context = b.lastTranscript
 		logrus.WithFields(logrus.Fields{
-			"user":          b.username,
+			"user":          b.getCurrentUsername(),
 			"context_age":   time.Since(b.lastTranscriptTime),
 			"context_chars": len(context),
 		}).Debug("Using previous transcript as context")
@@ -267,7 +287,7 @@ func (b *SmartUserBuffer) triggerTranscription(decision TranscribeDecision) {
 		ID:          uuid.New().String(),
 		SessionID:   b.sessionID,
 		UserID:      b.userID,
-		Username:    b.username,
+		Username:    b.getCurrentUsername(),
 		SSRC:        b.ssrc,
 		Audio:       b.processingBuffer.GetPCM(),
 		Duration:    b.processingBuffer.Duration(),
@@ -284,7 +304,7 @@ func (b *SmartUserBuffer) triggerTranscription(decision TranscribeDecision) {
 			b.mu.Unlock()
 
 			logrus.WithFields(logrus.Fields{
-				"user":       b.username,
+				"user":       b.getCurrentUsername(),
 				"length":     len(text),
 				"session_id": sessionID,
 				"text":       text,
@@ -292,23 +312,23 @@ func (b *SmartUserBuffer) triggerTranscription(decision TranscribeDecision) {
 
 			// Call session manager callback if available
 			if b.onTranscriptionComplete != nil && text != "" {
-				err := b.onTranscriptionComplete(sessionID, b.userID, b.username, text)
+				err := b.onTranscriptionComplete(sessionID, b.userID, b.getCurrentUsername(), text)
 				if err != nil {
 					logrus.WithError(err).WithFields(logrus.Fields{
-						"user":       b.username,
+						"user":       b.getCurrentUsername(),
 						"session_id": sessionID,
 						"text":       text,
 					}).Error("Failed to add transcript to session")
 				} else {
 					logrus.WithFields(logrus.Fields{
-						"user":       b.username,
+						"user":       b.getCurrentUsername(),
 						"session_id": sessionID,
 						"text":       text,
 					}).Info("Transcript successfully added to session")
 				}
 			} else {
 				logrus.WithFields(logrus.Fields{
-					"user":         b.username,
+					"user":         b.getCurrentUsername(),
 					"has_callback": b.onTranscriptionComplete != nil,
 					"text_empty":   text == "",
 					"session_id":   sessionID,
@@ -320,7 +340,7 @@ func (b *SmartUserBuffer) triggerTranscription(decision TranscribeDecision) {
 			b.isProcessing = false
 			b.mu.Unlock()
 
-			logrus.WithError(err).WithField("user", b.username).Error("Transcription failed")
+			logrus.WithError(err).WithField("user", b.getCurrentUsername()).Error("Transcription failed")
 		},
 	}
 
@@ -332,7 +352,7 @@ func (b *SmartUserBuffer) triggerTranscription(decision TranscribeDecision) {
 	select {
 	case b.outputChan <- segment:
 		logrus.WithFields(logrus.Fields{
-			"user":     b.username,
+			"user":     b.getCurrentUsername(),
 			"duration": segment.Duration,
 			"priority": segment.Priority,
 			"reason":   segment.Reason,
@@ -341,7 +361,7 @@ func (b *SmartUserBuffer) triggerTranscription(decision TranscribeDecision) {
 		// Queue full, log and drop
 		b.metrics.DroppedSegments++
 		logrus.WithFields(logrus.Fields{
-			"user":     b.username,
+			"user":     b.getCurrentUsername(),
 			"duration": segment.Duration,
 		}).Warn("Transcription queue full, segment dropped")
 		b.isProcessing = false
@@ -367,7 +387,7 @@ func (b *SmartUserBuffer) GetStatus() BufferStatus {
 
 	return BufferStatus{
 		UserID:          b.userID,
-		Username:        b.username,
+		Username:        b.getCurrentUsername(),
 		BufferDuration:  b.activeBuffer.Duration(),
 		IsProcessing:    b.isProcessing,
 		HasContext:      b.lastTranscript != "",
