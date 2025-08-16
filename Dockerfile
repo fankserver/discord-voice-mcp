@@ -1,23 +1,29 @@
-# Build stage
+# Build stage with ccache optimization
 FROM golang:1.24-alpine3.21 AS builder
 
-# Install build dependencies
+# Install build dependencies including ccache
 # hadolint ignore=DL3018
-RUN apk add --no-cache git gcc musl-dev pkgconfig opus-dev
+RUN apk add --no-cache git gcc musl-dev pkgconfig opus-dev ccache
+
+# Set up ccache
+ENV CCACHE_DIR=/ccache
+ENV PATH="/usr/lib/ccache/bin:${PATH}"
+RUN mkdir -p /ccache && chmod 777 /ccache
 
 WORKDIR /app
 
-# Copy go mod files
+# Copy go mod files first for better caching
 COPY go.mod go.sum ./
 RUN go mod download
 
 # Copy source code
 COPY . .
 
-# Build binary with CGO
+# Build binary with CGO and ccache
 # Docker buildx automatically handles cross-compilation via --platform flag
 # Using dynamic linking as static opus lib not available for all architectures
-RUN CGO_ENABLED=1 go build -ldflags '-w -s' \
+RUN --mount=type=cache,target=/ccache \
+    CGO_ENABLED=1 go build -ldflags '-w -s' \
     -o discord-voice-mcp ./cmd/discord-voice-mcp
 
 # Final stage

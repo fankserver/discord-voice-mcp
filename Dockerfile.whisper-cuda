@@ -1,12 +1,17 @@
-# NVIDIA GPU Optimized via CUDA (Maximum Performance)
-# Build stage for Go binary - using Ubuntu for glibc compatibility
+# NVIDIA GPU Optimized via CUDA (Maximum Performance) with build optimization
+# Build stage for Go binary with ccache - using Ubuntu for glibc compatibility
 FROM golang:1.24-bookworm AS go-builder
 
-# Install build dependencies
+# Install build dependencies including ccache
 # hadolint ignore=DL3008
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    git gcc pkg-config libopus-dev \
+    git gcc pkg-config libopus-dev ccache \
     && rm -rf /var/lib/apt/lists/*
+
+# Set up ccache
+ENV CCACHE_DIR=/ccache
+ENV PATH="/usr/lib/ccache:${PATH}"
+RUN mkdir -p /ccache && chmod 777 /ccache
 
 WORKDIR /app
 
@@ -17,9 +22,10 @@ RUN go mod download
 # Copy source code
 COPY . .
 
-# Build binary with CGO
+# Build binary with CGO and ccache
 # Using dynamic linking as static opus lib not available for all architectures
-RUN CGO_ENABLED=1 go build -ldflags '-w -s' \
+RUN --mount=type=cache,target=/ccache \
+    CGO_ENABLED=1 go build -ldflags '-w -s' \
     -o discord-voice-mcp ./cmd/discord-voice-mcp
 
 # Use prebuilt CUDA-enabled image for maximum NVIDIA performance

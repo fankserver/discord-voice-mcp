@@ -26,7 +26,7 @@ var (
 
 func init() {
 	flag.StringVar(&Token, "token", "", "Discord Bot Token")
-	flag.StringVar(&TranscriberType, "transcriber", "mock", "Transcriber type: mock, whisper, or google")
+	flag.StringVar(&TranscriberType, "transcriber", "mock", "Transcriber type: mock, whisper, faster-whisper, or google")
 	flag.StringVar(&WhisperModel, "whisper-model", "", "Path to Whisper model file (required for whisper transcriber)")
 	flag.Parse()
 
@@ -83,6 +83,16 @@ func main() {
 	var trans transcriber.Transcriber
 	var err error
 	switch strings.ToLower(TranscriberType) {
+	case "faster-whisper":
+		modelName := os.Getenv("FASTER_WHISPER_MODEL")
+		if modelName == "" {
+			modelName = "base.en" // Default model
+		}
+		trans, err = transcriber.NewFasterWhisperTranscriber(modelName)
+		if err != nil {
+			logrus.WithError(err).Fatal("Failed to initialize FasterWhisper transcriber")
+		}
+		logrus.WithField("model", modelName).Info("Using FasterWhisper transcriber")
 	case "whisper":
 		if WhisperModel == "" {
 			logrus.Fatal("Whisper model path is required when using whisper transcriber")
