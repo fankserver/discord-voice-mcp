@@ -26,7 +26,7 @@ RUN CGO_ENABLED=1 go build -ldflags '-w -s' \
 FROM ghcr.io/ggml-org/whisper.cpp:main-cuda AS whisper-source
 
 # Final stage with CUDA runtime for NVIDIA GPUs (includes CUDA libraries)
-FROM nvidia/cuda:13.0.0-runtime-ubuntu22.04 AS final
+FROM nvidia/cuda:13.0.1-runtime-ubuntu22.04 AS final
 
 # Install runtime dependencies
 # hadolint ignore=DL3008
