@@ -56,7 +56,7 @@ RUN ldconfig
 
 # Create directories and add user
 RUN mkdir -p /models && \
-    (id -u mcp &>/dev/null || useradd -m -u 1000 -s /bin/bash mcp)
+    (id -u mcp >/dev/null 2>&1 || useradd -m -u 1000 -s /bin/bash mcp)
 
 USER mcp
 
