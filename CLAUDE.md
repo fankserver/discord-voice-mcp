@@ -7,7 +7,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 Discord Voice MCP Server - A high-performance Discord voice transcription server with MCP (Model Context Protocol) integration, written in Go.
 
 ### Key Technologies
-- **Go 1.24** - Primary language with standard project layout
+- **Go 1.25** - Primary language with standard project layout
 - **MCP Go SDK** (v0.2.0) - Official Model Context Protocol SDK (experimental)
 - **discordgo** (v0.28.1) - Discord API wrapper
 - **gopus** - Opus audio codec (requires CGO)
@@ -188,7 +188,7 @@ All use:
 - hadolint ignore directives for unpinned packages (DL3018)
 
 ## GitHub Actions Workflows
-- **CI**: Tests on Go 1.23/1.24, linting, security scanning
+- **CI**: Tests on Go 1.25, linting, security scanning
 - **Docker Build**: Multi-arch builds (amd64/arm64) for normal and minimal variants
 - **Release**: Publishes Docker images and platform binaries on tag
 

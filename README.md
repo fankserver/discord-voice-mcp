@@ -9,7 +9,7 @@ A pure MCP (Model Context Protocol) server for Discord voice channel transcripti
 | Docker Image | **~12 MB** (minimal) / **~50 MB** (with ffmpeg) / **~500 MB** (whisper with GPU) |
 | Binary Size | ~15 MB |
 | Memory Usage | ~10-20 MB (base) / ~200-500 MB (with Whisper) |
-| Language | Go 1.24 |
+| Language | Go 1.25 |
 | MCP SDK | v0.2.0 (official Go SDK) |
 | GPU Support | CUDA, ROCm, Vulkan (auto-detected) |
 
@@ -140,7 +140,7 @@ pkg/
 ## 🛠️ Development
 
 ### Prerequisites
-- Go 1.24+ 
+- Go 1.25+ 
 - FFmpeg (for audio processing with normal Docker image)
 - Discord Bot Token
 - (Optional) Whisper.cpp and model file for real transcription
