@@ -25,7 +25,7 @@ RUN CGO_ENABLED=1 go build -ldflags '-w -s' \
 FROM ghcr.io/kth8/whisper-server-vulkan:latest AS whisper-amd64
 
 # For ARM64: Build from source (Vulkan support for ARM GPUs)
-FROM ubuntu:22.04 AS whisper-arm64
+FROM ubuntu:24.04 AS whisper-arm64
 
 # Install build dependencies for ARM64
 # hadolint ignore=DL3008
@@ -68,7 +68,7 @@ ARG TARGETARCH
 FROM whisper-${TARGETARCH} AS whisper-source
 
 # Final stage - Ubuntu base for Vulkan support
-FROM ubuntu:22.04 AS final
+FROM ubuntu:24.04 AS final
 
 # Install runtime dependencies including Vulkan
 # hadolint ignore=DL3008
